@@ -4,6 +4,7 @@ import parser from '@typescript-eslint/parser'
 export default [
   {
     files: ['**/*.ts'],
+    ignores: ['dist/**', 'node_modules/**'],
     languageOptions: {
       parser,
       parserOptions: {
@@ -16,7 +17,7 @@ export default [
     },
     rules: {
       'no-console': 'off',
-      '@typescript-eslint/no-unused-vars': ['warn'],
+      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
       '@typescript-eslint/consistent-type-imports': ['error'],
     },
   },
