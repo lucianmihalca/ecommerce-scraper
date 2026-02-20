@@ -3,8 +3,6 @@
 A modular Node.js + TypeScript solution designed to programmatically navigate and
 extract structured data from an e-commerce website.
 
----
-
 ## Overview
 
 This project implements a structured scraping module for an e-commerce platform. It
@@ -16,16 +14,12 @@ provides a clean and reusable API that allows:
 
 For this assignment, the selected retailer is **PcComponentes (pccomponentes.com)**.
 
----
-
 ## Tech Stack
 
 - Node.js (v18+)
 - TypeScript
 - pnpm _(package manager)_
 - Playwright _(to be integrated)_
-
----
 
 ## Installation
 
@@ -35,8 +29,6 @@ For this assignment, the selected retailer is **PcComponentes (pccomponentes.com
 ```bash
 pnpm install
 ```
-
----
 
 ## Project Structure
 
