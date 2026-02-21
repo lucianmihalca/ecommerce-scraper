@@ -7,7 +7,7 @@
     "lint": "eslint .",
     "build": "tsc",
     "build:watch": "tsc --watch",
-    "verify:navigator": "node dist/scripts/verify-navigator.js"
+    "demo": "node dist/scripts/demo.js"
   },
   "keywords": [],
   "author": "Lucian Mihalca",
