@@ -5,12 +5,12 @@
 
 import type { ProductListItem } from './ProductListItem'
 
-export type ProductSpects = Record<string, string>
+export type ProductSpecs = Record<string, string>
 
 export interface ProductDetail extends ProductListItem {
   description: string
   images: string[]
-  specs: ProductSpects
+  specs: ProductSpecs
   brand?: string
   sku?: string
 }

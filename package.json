@@ -6,7 +6,8 @@
   "scripts": {
     "lint": "eslint .",
     "build": "tsc",
-    "build:watch": "tsc --watch"
+    "build:watch": "tsc --watch",
+    "verify:navigator": "node dist/scripts/verify-navigator.js"
   },
   "keywords": [],
   "author": "Lucian Mihalca",
@@ -17,6 +18,7 @@
     "@typescript-eslint/eslint-plugin": "^8.56.0",
     "@typescript-eslint/parser": "^8.56.0",
     "eslint": "^9.39.3",
+    "playwright": "^1.58.2",
     "typescript": "^5.9.3"
   }
 }
