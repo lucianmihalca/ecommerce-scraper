@@ -4,4 +4,5 @@ export interface RetailerSearchParams {
   keywords: string
   page?: number
   maxResults?: number
+  category?: string
 }

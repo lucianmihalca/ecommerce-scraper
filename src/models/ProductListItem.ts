@@ -10,4 +10,5 @@ export interface ProductListItem {
   url: string
   position: number
   imageUrl?: string
+  category?: string
 }

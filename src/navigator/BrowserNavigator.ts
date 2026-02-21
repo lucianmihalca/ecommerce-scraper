@@ -1,6 +1,8 @@
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
 
 import type { NavigatorConfig } from './navigator.types'
+const DEFAULT_USER_AGENT =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 
 export class BrowserNavigator {
   private browser: Browser | null = null
@@ -38,12 +40,10 @@ export class BrowserNavigator {
     try {
       this.browser = await chromium.launch({ headless, slowMo: slowMoMs })
 
-      const userAgent = this.config.userAgent
+      const userAgent = this.config.userAgent ?? DEFAULT_USER_AGENT
 
       //   this.context = await this.browser.newContext()
-      this.context = await this.browser.newContext(
-        userAgent ? { userAgent } : undefined,
-      )
+      this.context = await this.browser.newContext({ userAgent })
 
       // Apply default timeouts to all pages created from this context.
       this.context.setDefaultTimeout(timeoutMs)
