@@ -1,45 +1,143 @@
 # ecommerce-scraper
 
-A modular Node.js + TypeScript solution designed to programmatically navigate and
-extract structured data from an e-commerce website.
+A modular Node.js + TypeScript scraper that programmatically navigates and extracts structured product data from e-commerce websites.
 
-## Overview
+Built around a clean `IRetailer` interface, it separates browser navigation, page scraping, and the public API into distinct, maintainable layers. The current implementation targets **PcComponentes** (pccomponentes.com).
 
-This project implements a structured scraping module for an e-commerce platform. It
-provides a clean and reusable API that allows:
+## Features
 
-- Retrieving product listings based on search criteria
-- Extracting detailed product information
-- Separating navigation and scraping logic into maintainable layers
+- Search products by keyword with pagination support
+- Extract full product detail (specs, images, description, brand, SKU)
+- Clean public API — consumers only interact with `PcComponentes`
+- Headless or headed browser mode via Playwright
+- Easily extensible to other retailers via the `IRetailer` interface
 
-For this assignment, the selected retailer is **PcComponentes (pccomponentes.com)**.
+## Why PcComponentes
+
+PcComponentes is a Spanish e-commerce with real-world anti-bot protection (Cloudflare).
+Navigating it successfully required proper browser fingerprinting via Playwright and a
+custom user agent — a non-trivial challenge compared to scraping unprotected sites.
+
+Product data is extracted using two complementary strategies:
+
+- **Search results** — stable `data-*` attributes embedded directly in the HTML
+- **Product detail** — Schema.org JSON-LD structured data maintained for SEO,
+  supplemented by DOM extraction for technical specifications
 
 ## Tech Stack
 
-- Node.js (v18+)
-- TypeScript
-- pnpm _(package manager)_
-- Playwright _(to be integrated)_
+| Tool | Purpose |
+|---|---|
+| Node.js v18+ | Runtime |
+| TypeScript | Type safety |
+| Playwright | Browser automation |
+| pnpm | Package manager |
 
 ## Installation
 
-> This project uses **pnpm** as package manager. If you don't have it installed:
-> `npm install -g pnpm`
+> Requires **pnpm**. Install it with `npm install -g pnpm` if needed.
 
 ```bash
 pnpm install
+pnpm exec playwright install chromium
+pnpm build
 ```
+
+## Quick Start
+
+```ts
+import { PcComponentes } from './src/PcComponentes'
+
+const retailer = new PcComponentes({ headless: true })
+
+// Search products
+const result = await retailer.getProductList({ keywords: 'ddr5', page: 1, maxResults: 5 })
+console.log(result.items)
+
+// Get full product detail
+const detail = await retailer.getProduct(result.items[0])
+console.log(detail.name, detail.price, detail.specs)
+
+await retailer.close()
+```
+
+Or run the built-in demo:
+
+```bash
+pnpm demo
+```
+
+## API
+
+### `new PcComponentes(config?)`
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `headless` | `boolean` | `true` | Run browser in headless mode |
+
+### `getProductList(params): Promise<ProductListResult>`
+
+| Param | Type | Description |
+|---|---|---|
+| `keywords` | `string` | Search query |
+| `page` | `number?` | Page number (default: 1) |
+| `maxResults` | `number?` | Max items to return |
+| `category` | `string?` | Filter by category |
+
+### `getProduct(input): Promise<ProductDetail>`
+
+Accepts either a `ProductListItem` (from a previous search) or a direct product URL string.
+
+### `close(): Promise<void>`
+
+Closes the browser instance. Always call this when done.
 
 ## Project Structure
 
 ```
 src/
-├── models/       # TypeScript interfaces and classes
-├── navigator/    # Browser navigation with Playwright
-├── scrapers/     # Page-specific scraping logic
-└── index.ts      # Main entry point
+├── PcComponentes.ts          # Public API — implements IRetailer
+├── index.ts                  # Module entry point
+├── interfaces/
+│   └── IRetailer.ts          # Retailer contract
+├── models/
+│   ├── ProductListItem.ts    # Listing-level product data
+│   ├── ProductDetail.ts      # Full product detail (extends ProductListItem)
+│   ├── ProductListResult.ts  # Search result wrapper
+│   └── RetailerSearchParams.ts
+├── navigator/
+│   ├── BrowserNavigator.ts   # Playwright browser/page lifecycle
+│   └── navigator.types.ts
+├── scrapers/
+│   ├── ProductListScraper.ts # Extracts product cards from search pages
+│   └── ProductDetailScraper.ts # Extracts detail via Schema.org JSON-LD + DOM
+└── scripts/
+    └── demo.ts               # End-to-end usage example
 ```
 
-## Status
+## Extending to Other Retailers
 
-🚧 In progress
+Implement the `IRetailer` interface to add support for a new retailer:
+
+```ts
+import type { IRetailer } from './interfaces/IRetailer'
+
+export class MyRetailer implements IRetailer {
+  async getProductList(params) { /* ... */ }
+  async getProduct(input)      { /* ... */ }
+  async close()                { /* ... */ }
+}
+```
+
+## Scripts
+
+| Command | Description |
+|---|---|
+| `pnpm build` | Compile TypeScript to `dist/` |
+| `pnpm build:watch` | Watch mode |
+| `pnpm demo` | Run the end-to-end demo |
+| `pnpm lint` | Run ESLint |
+
+## Author
+
+Lucian Mihalca
