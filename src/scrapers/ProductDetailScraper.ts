@@ -145,7 +145,8 @@ export class ProductDetailScraper {
     }
   }
 
-  private async extractSpecs(): Promise<ProductSpecs> {
+  // Primary strategy: structured table (most products)
+  private async extractSpecsFromTable(): Promise<ProductSpecs> {
     try {
       return await this.page.$$eval('table.smart-product-table tr', (rows) => {
         const specs: Record<string, string> = {}
@@ -166,6 +167,53 @@ export class ProductDetailScraper {
     } catch {
       return {}
     }
+  }
+
+  // Fallback strategy: specs as a list under "Especificaciones" heading (custom HTML products)
+  private async extractSpecsFromDescription(): Promise<ProductSpecs> {
+    try {
+      return await this.page.evaluate(() => {
+        const specs: Record<string, string> = {}
+
+        const description = document.querySelector('#description')
+        if (!description) return specs
+
+        const headings = Array.from(description.querySelectorAll('h2, h3'))
+        const specHeading = headings.find((h) =>
+          h.textContent?.toLowerCase().includes('especificaciones'),
+        )
+        if (!specHeading) return specs
+
+        const ul = specHeading.nextElementSibling
+        if (!ul || ul.tagName.toLowerCase() !== 'ul') return specs
+
+        for (const li of Array.from(ul.querySelectorAll('li'))) {
+          const text = li.textContent?.trim() ?? ''
+          if (!text) continue
+          const idx = text.indexOf(':')
+          if (idx > 0) {
+            specs[text.slice(0, idx).trim()] = text.slice(idx + 1).trim()
+          } else {
+            specs[text] = 'true'
+          }
+        }
+
+        return specs
+      })
+    } catch {
+      return {}
+    }
+  }
+
+  // Tries table first, falls back to description list if table is empty
+  private async extractSpecs(): Promise<ProductSpecs> {
+    const fromTable = await this.extractSpecsFromTable()
+    if (Object.keys(fromTable).length > 0) return fromTable
+
+    const fromDescription = await this.extractSpecsFromDescription()
+    if (Object.keys(fromDescription).length > 0) return fromDescription
+
+    return {}
   }
 
   // Scrape detail directly from a list item

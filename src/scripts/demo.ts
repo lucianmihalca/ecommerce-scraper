@@ -7,12 +7,12 @@ async function main() {
     const page1 = await retailer.getProductList({
       keywords: 'ddr5',
       page: 1,
-      maxResults: 5,
+      maxResults: 10,
     })
     const page2 = await retailer.getProductList({
       keywords: 'ddr5',
       page: 2,
-      maxResults: 5,
+      maxResults: 10,
     })
 
     console.log('--- PAGE 1 ---')
