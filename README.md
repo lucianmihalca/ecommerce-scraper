@@ -22,7 +22,9 @@ Product data is extracted using two complementary strategies:
 
 - **Search results** — stable `data-*` attributes embedded directly in the HTML
 - **Product detail** — Schema.org JSON-LD structured data maintained for SEO,
-  supplemented by DOM extraction for technical specifications
+  with two-layer DOM fallbacks for resilience against inconsistent layouts:
+  - Description: falls back to `#description` block when JSON-LD quality is too low
+  - Specs: falls back to a `<ul>` list under the "Especificaciones" heading when no structured table is present
 
 ## Tech Stack
 
@@ -110,7 +112,7 @@ src/
 │   └── navigator.types.ts
 ├── scrapers/
 │   ├── ProductListScraper.ts # Extracts product cards from search pages
-│   └── ProductDetailScraper.ts # Extracts detail via Schema.org JSON-LD + DOM
+│   └── ProductDetailScraper.ts # Extracts detail via JSON-LD + DOM fallbacks (description & specs)
 └── scripts/
     └── demo.ts               # End-to-end usage example
 ```
