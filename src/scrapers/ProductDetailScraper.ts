@@ -126,22 +126,95 @@ export class ProductDetailScraper {
       throw new Error(`Product JSON-LD not found at: ${absoluteUrl}`)
     }
 
+    // Description: JSON-LD by default, DOM fallback only if low quality (index 0 case)
+    const productName = (product.name?.trim() ?? base?.name ?? '').trim()
+    const jsonLdDescription = (product.description ?? '').trim()
+
+    let description = jsonLdDescription
+    if (this.isLowQualityDescription(jsonLdDescription, productName)) {
+      const domDescription = await this.extractDescriptionFromDescriptionBlock()
+      if (domDescription) description = domDescription
+    }
+
     const images = extractImages(product)
     const specs = await this.extractSpecs()
 
     return {
       id: base?.id ?? product.sku ?? product.productID ?? absoluteUrl,
-      name: product.name?.trim() ?? base?.name ?? '',
+      name: productName,
       price: extractPrice(product.offers, base?.price),
       url: product.url ?? absoluteUrl,
       position: base?.position ?? 0,
       imageUrl: base?.imageUrl ?? images[0] ?? undefined,
       category: product.category?.trim() ?? base?.category,
       brand: extractBrand(product),
-      description: (product.description ?? '').trim(),
+      description,
       images,
       specs,
       sku: product.sku,
+    }
+  }
+
+  // -------------------------
+  // Description helpers
+  // -------------------------
+
+  private isLowQualityDescription(description: string, productName: string): boolean {
+    const normalizedDescription = description.trim().toLowerCase()
+    const normalizedName = productName.trim().toLowerCase()
+
+    if (!normalizedDescription) return true
+
+    const containsCssMarkers =
+      normalizedDescription.startsWith('@font-face') ||
+      normalizedDescription.includes('font-family') ||
+      normalizedDescription.includes('src: url(') ||
+      (normalizedDescription.includes('{') && normalizedDescription.includes('}'))
+
+    if (containsCssMarkers) return true
+
+    // Detect "name repeated many times" (common bad JSON-LD on some products)
+    if (normalizedName) {
+      const occurrences = normalizedDescription.split(normalizedName).length - 1
+      if (occurrences >= 2) return true
+    }
+
+    return false
+  }
+
+  /**
+   * Extracts the readable "Sobre el producto" text from the DOM.
+   * It takes <p> blocks inside #description until "Características" / "Especificaciones" headings appear.
+   */
+  private async extractDescriptionFromDescriptionBlock(): Promise<string> {
+    try {
+      return await this.page.evaluate(() => {
+        const descriptionRoot = document.querySelector('#description')
+        if (!descriptionRoot) return ''
+
+        const paragraphs: string[] = []
+        const children = Array.from(descriptionRoot.children)
+
+        for (const element of children) {
+          const tagName = element.tagName.toLowerCase()
+
+          if (tagName === 'h2' || tagName === 'h3') {
+            const headingText = (element.textContent ?? '').toLowerCase()
+            const isStopHeading =
+              headingText.includes('caracter') || headingText.includes('especific')
+            if (isStopHeading) break
+          }
+
+          if (tagName === 'p') {
+            const text = (element.textContent ?? '').replace(/\s+/g, ' ').trim()
+            if (text) paragraphs.push(text)
+          }
+        }
+
+        return paragraphs.join('\n\n')
+      })
+    } catch {
+      return ''
     }
   }
 
@@ -170,7 +243,7 @@ export class ProductDetailScraper {
   }
 
   // Fallback strategy: specs as a list under "Especificaciones" heading (custom HTML products)
-  private async extractSpecsFromDescription(): Promise<ProductSpecs> {
+  private async extractSpecsFromDescriptionBlock(): Promise<ProductSpecs> {
     try {
       return await this.page.evaluate(() => {
         const specs: Record<string, string> = {}
@@ -184,13 +257,24 @@ export class ProductDetailScraper {
         )
         if (!specHeading) return specs
 
-        const ul = specHeading.nextElementSibling
-        if (!ul || ul.tagName.toLowerCase() !== 'ul') return specs
+        let node = specHeading.nextElementSibling
+        let guard = 0
+
+        while (node && guard++ < 10) {
+          if (node.tagName.toLowerCase() === 'ul') break
+          node = node.nextElementSibling
+        }
+
+        if (!node || node.tagName.toLowerCase() !== 'ul') return specs
+        const ul = node
 
         for (const li of Array.from(ul.querySelectorAll('li'))) {
           const text = li.textContent?.trim() ?? ''
           if (!text) continue
-          const idx = text.indexOf(':')
+
+          const asciiIndex = text.indexOf(':')
+          const fullWidthIndex = text.indexOf('：')
+          const idx = asciiIndex >= 0 ? asciiIndex : fullWidthIndex
           if (idx > 0) {
             specs[text.slice(0, idx).trim()] = text.slice(idx + 1).trim()
           } else {
@@ -210,7 +294,7 @@ export class ProductDetailScraper {
     const fromTable = await this.extractSpecsFromTable()
     if (Object.keys(fromTable).length > 0) return fromTable
 
-    const fromDescription = await this.extractSpecsFromDescription()
+    const fromDescription = await this.extractSpecsFromDescriptionBlock()
     if (Object.keys(fromDescription).length > 0) return fromDescription
 
     return {}
