@@ -4,7 +4,7 @@ async function main() {
   const retailer = new PcComponentes({ headless: true })
 
   try {
-    console.log('⏳ Buscando páginas 1 y 2 en paralelo...')
+    console.log('⏳ Fetching pages 1 and 2 in parallel...')
     const [page1, page2] = await Promise.all([
       retailer.getProductList({
         keywords: 'ddr5',
@@ -37,7 +37,7 @@ async function main() {
     )
 
     console.log('\n--- PRODUCT DETAIL (first result) ---')
-    const firstItem = page1.items[1]
+    const firstItem = page1.items[0]
     if (firstItem) {
       const detail = await retailer.getProduct(firstItem)
       console.log(`✅ Name: ${detail.name}`)
