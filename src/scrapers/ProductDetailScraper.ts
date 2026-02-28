@@ -94,8 +94,8 @@ function extractImages(product: JsonLdProduct): string[] {
     .filter(Boolean)
 }
 
-function extractPrice(offers: unknown, fallback?: number): number {
-  if (typeof fallback === 'number') return fallback
+function extractPrice(offers: unknown, fallback?: number): number | undefined {
+  if (typeof fallback === 'number' && Number.isFinite(fallback)) return fallback
 
   const obj = Array.isArray(offers)
     ? offers[0]
@@ -110,7 +110,7 @@ function extractPrice(offers: unknown, fallback?: number): number {
     if (Number.isFinite(n)) return n
   }
 
-  return NaN
+  return undefined
 }
 
 export class ProductDetailScraper {
@@ -136,13 +136,18 @@ export class ProductDetailScraper {
       if (domDescription) description = domDescription
     }
 
+    const price = extractPrice(product.offers, base?.price)
+    if (typeof price !== 'number') {
+      throw new Error(`Product price not found or invalid at: ${absoluteUrl}`)
+    }
+
     const images = extractImages(product)
     const specs = await this.extractSpecs()
 
     return {
       id: base?.id ?? product.sku ?? product.productID ?? absoluteUrl,
       name: productName,
-      price: extractPrice(product.offers, base?.price),
+      price,
       url: product.url ?? absoluteUrl,
       position: base?.position ?? 0,
       imageUrl: base?.imageUrl ?? images[0] ?? undefined,
@@ -165,11 +170,12 @@ export class ProductDetailScraper {
 
     if (!normalizedDescription) return true
 
+    const cssLikeBlockPattern = /\{[^}]*:[^}]*\}/
     const containsCssMarkers =
       normalizedDescription.startsWith('@font-face') ||
       normalizedDescription.includes('font-family') ||
       normalizedDescription.includes('src: url(') ||
-      (normalizedDescription.includes('{') && normalizedDescription.includes('}'))
+      cssLikeBlockPattern.test(normalizedDescription)
 
     if (containsCssMarkers) return true
 
@@ -258,15 +264,23 @@ export class ProductDetailScraper {
         if (!specHeading) return specs
 
         let node = specHeading.nextElementSibling
-        let guard = 0
+        let ul: Element | null = null
 
-        while (node && guard++ < 10) {
-          if (node.tagName.toLowerCase() === 'ul') break
+        while (node) {
+          const tagName = node.tagName.toLowerCase()
+
+          // Stop when we reach the next section heading.
+          if (tagName === 'h2' || tagName === 'h3') break
+
+          if (tagName === 'ul') {
+            ul = node
+            break
+          }
+
           node = node.nextElementSibling
         }
 
-        if (!node || node.tagName.toLowerCase() !== 'ul') return specs
-        const ul = node
+        if (!ul) return specs
 
         for (const li of Array.from(ul.querySelectorAll('li'))) {
           const text = li.textContent?.trim() ?? ''

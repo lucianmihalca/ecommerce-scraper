@@ -7,6 +7,7 @@ const DEFAULT_USER_AGENT =
 export class BrowserNavigator {
   private browser: Browser | null = null
   private context: BrowserContext | null = null
+  private initPromise: Promise<void> | null = null
 
   constructor(private readonly config: NavigatorConfig = {}) {}
 
@@ -32,28 +33,34 @@ export class BrowserNavigator {
   async open(): Promise<void> {
     // Prevent double initialization.
     if (this.browser) return
+    if (this.initPromise) return this.initPromise
 
-    const headless = this.config.headless ?? true
-    const timeoutMs = this.config.timeoutMs ?? 30_000
-    const slowMoMs = this.config.slowMoMs ?? 0
+    this.initPromise = (async () => {
+      const headless = this.config.headless ?? true
+      const timeoutMs = this.config.timeoutMs ?? 30_000
+      const slowMoMs = this.config.slowMoMs ?? 0
 
-    try {
-      this.browser = await chromium.launch({ headless, slowMo: slowMoMs })
+      try {
+        this.browser = await chromium.launch({ headless, slowMo: slowMoMs })
 
-      const userAgent = this.config.userAgent ?? DEFAULT_USER_AGENT
+        const userAgent = this.config.userAgent ?? DEFAULT_USER_AGENT
 
-      //   this.context = await this.browser.newContext()
-      this.context = await this.browser.newContext({ userAgent })
+        //   this.context = await this.browser.newContext()
+        this.context = await this.browser.newContext({ userAgent })
 
-      // Apply default timeouts to all pages created from this context.
-      this.context.setDefaultTimeout(timeoutMs)
-      this.context.setDefaultNavigationTimeout(timeoutMs)
-    } catch (error: unknown) {
-      // If initialization fails halfway, clean up any resources already created.
-      await this.close()
-      const message = error instanceof Error ? error.message : String(error)
-      throw new Error(`Failed to initialize BrowserNavigator: ${message}`)
-    }
+        // Apply default timeouts to all pages created from this context.
+        this.context.setDefaultTimeout(timeoutMs)
+        this.context.setDefaultNavigationTimeout(timeoutMs)
+      } catch (error: unknown) {
+        // If initialization fails halfway, clean up any resources already created.
+        await this.close()
+        const message = error instanceof Error ? error.message : String(error)
+        throw new Error(`Failed to initialize BrowserNavigator: ${message}`)
+      } finally {
+        this.initPromise = null
+      }
+    })()
+    return this.initPromise
   }
 
   async newPage(): Promise<Page> {
