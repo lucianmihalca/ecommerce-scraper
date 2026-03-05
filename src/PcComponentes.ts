@@ -25,7 +25,7 @@ export class PcComponentes implements IRetailer {
     await this.navigator.open()
     const page = await this.navigator.newPage()
     const logger = this.navigator.getLogger()
-    const scraper = new ProductListScraper(page, logger)
+    const scraper = new ProductListScraper(this.navigator, page, logger)
     return scraper.scrape(params)
   }
 
@@ -33,7 +33,7 @@ export class PcComponentes implements IRetailer {
     await this.navigator.open()
     const page = await this.navigator.newPage()
     const logger = this.navigator.getLogger()
-    const scraper = new ProductDetailScraper(page, logger)
+    const scraper = new ProductDetailScraper(this.navigator, page, logger)
 
     if (typeof input === 'string') {
       return scraper.scrape(input)

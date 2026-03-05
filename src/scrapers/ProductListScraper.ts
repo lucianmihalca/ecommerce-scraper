@@ -3,11 +3,11 @@ import type { ProductListItem } from '../models/ProductListItem'
 import type { ProductListResult } from '../models/ProductListResult'
 import type { RetailerSearchParams } from '../models/RetailerSearchParams'
 import { type Logger, silentLogger } from '../utils/logger'
+import type { BrowserNavigator } from '../navigator/BrowserNavigator'
 
 const BASE_URL = 'https://www.pccomponentes.com'
 const API_BASE = `${BASE_URL}/api/articles/search`
 const DEFAULT_PAGE_SIZE = 40
-const BOOTSTRAP_DELAY_MS = 1500
 
 type ApiArticleImage = {
   path: string
@@ -45,6 +45,7 @@ export class ProductListScraper {
   // Page is kept for consistency with the IRetailer architecture.
   // We use its browser context to inherit Cloudflare cookies.
   constructor(
+    private readonly navigator: BrowserNavigator,
     private readonly page: Page,
     private readonly logger: Logger = silentLogger,
   ) {}
@@ -59,11 +60,11 @@ export class ProductListScraper {
       page: pageNum,
     })
 
+    await this.navigator.waitRequestDelay()
     // 1) Bootstrap cookies (lo dejamos igual por ahora)
     await this.page.goto(`${BASE_URL}/buscar/?query=${encodeURIComponent(query)}`, {
       waitUntil: 'domcontentloaded',
     })
-    await this.page.waitForTimeout(BOOTSTRAP_DELAY_MS)
 
     const url = new URL(API_BASE)
     url.searchParams.set('query', query)
@@ -76,6 +77,7 @@ export class ProductListScraper {
     url.searchParams.set('showOem', 'false')
 
     // 3) Llamada con retry/timeout
+    await this.navigator.waitRequestDelay()
     const data = await this.fetchSearchApi(url.toString())
 
     // 4) Mapper (lo mejoraremos en A3, pero lo dejamos por ahora)
@@ -183,6 +185,7 @@ export class ProductListScraper {
           error: e instanceof Error ? e.message : String(e),
         })
         if (attempt === maxAttempts) break
+        await this.navigator.waitRequestDelay()
         const delay = baseDelayMs * attempt
         await this.page.waitForTimeout(delay)
       }
