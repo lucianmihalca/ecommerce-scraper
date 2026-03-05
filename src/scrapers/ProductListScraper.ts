@@ -2,92 +2,196 @@ import type { Page } from 'playwright'
 import type { ProductListItem } from '../models/ProductListItem'
 import type { ProductListResult } from '../models/ProductListResult'
 import type { RetailerSearchParams } from '../models/RetailerSearchParams'
+import { type Logger, silentLogger } from '../utils/logger'
 
 const BASE_URL = 'https://www.pccomponentes.com'
+const API_BASE = `${BASE_URL}/api/articles/search`
+const DEFAULT_PAGE_SIZE = 40
+const BOOTSTRAP_DELAY_MS = 1500
 
-// All fragile DOM-dependent selectors live here.
-// Update this object if PcComponentes changes their markup.
-const SELECTORS = {
-  productCard: 'a[data-testid="normal-link"][data-product-name]',
-} as const
+type ApiArticleImage = {
+  path: string
+  width: number
+  height: number
+}
 
-type RawItem = {
+type ApiArticle = {
   id: string
   name: string
-  price: string
-  url: string
-  imageUrl?: string
-  category?: string
+  slug: string
+  brandName?: string
+  promotionalPrice?: number
+  originalPrice?: number
+  images?: {
+    small?: ApiArticleImage
+    medium?: ApiArticleImage
+    large?: ApiArticleImage
+  }
+  mainCategory?: {
+    name?: string
+    slug?: string
+  }
 }
 
-function absolutizeUrl(href: string): string {
-  if (!href) return ''
-  if (href.startsWith('http')) return href
-  if (href.startsWith('/')) return `${BASE_URL}${href}`
-  return `${BASE_URL}/${href}`
+type ApiResponse = {
+  articles?: ApiArticle[]
+  total?: number
 }
 
-function parsePrice(raw: string): number {
-  const cleaned = raw
-    .replace(/\s/g, '')
-    .replace('€', '')
-    .replace(/\.(?=\d{3}(\D|$))/g, '') // remove thousands separator
-    .replace(',', '.') // normalize decimal separator
-    .replace(/[^\d.]/g, '') // remove any remaining non-numeric chars
-
-  const n = Number.parseFloat(cleaned)
-  return Number.isFinite(n) ? n : NaN
-}
+type ApiErrorPayload = { __error: { status: number; text: string } }
+type ApiEvaluateResult = ApiResponse | ApiErrorPayload
 
 export class ProductListScraper {
-  constructor(private readonly page: Page) {}
+  // Page is kept for consistency with the IRetailer architecture.
+  // We use its browser context to inherit Cloudflare cookies.
+  constructor(
+    private readonly page: Page,
+    private readonly logger: Logger = silentLogger,
+  ) {}
 
   async scrape(params: RetailerSearchParams): Promise<ProductListResult> {
-    const query = encodeURIComponent(params.keywords.trim())
     const pageNum = params.page ?? 1
-    const searchUrl = `${BASE_URL}/buscar/?query=${query}&page=${pageNum}`
+    const pageSize = DEFAULT_PAGE_SIZE
+    const query = params.keywords.trim()
 
-    await this.page.goto(searchUrl, { waitUntil: 'domcontentloaded' })
+    this.logger.log('debug', 'PCC list scraper start', {
+      query,
+      page: pageNum,
+    })
 
-    const cards = this.page.locator(SELECTORS.productCard)
-    await cards
-      .first()
-      .waitFor({ state: 'visible', timeout: 15_000 })
-      .catch(() => {})
+    // 1) Bootstrap cookies (lo dejamos igual por ahora)
+    await this.page.goto(`${BASE_URL}/buscar/?query=${encodeURIComponent(query)}`, {
+      waitUntil: 'domcontentloaded',
+    })
+    await this.page.waitForTimeout(BOOTSTRAP_DELAY_MS)
 
-    // No results found — return empty result instead of throwing
-    if ((await cards.count()) === 0) {
-      return { query: params, total: 0, items: [] }
-    }
+    const url = new URL(API_BASE)
+    url.searchParams.set('query', query)
+    url.searchParams.set('sort', 'relevance')
+    url.searchParams.set('sortVersion', 'default')
+    url.searchParams.set('channel', 'es')
+    url.searchParams.set('page', String(pageNum))
+    url.searchParams.set('pageSize', String(pageSize))
+    url.searchParams.set('analytics', 'true')
+    url.searchParams.set('showOem', 'false')
 
-    const raw: RawItem[] = await this.page.$$eval(SELECTORS.productCard, (elements) =>
-      elements.map((el) => ({
-        id: el.getAttribute('data-product-id') ?? '',
-        name: el.getAttribute('data-product-name') ?? '',
-        price: el.getAttribute('data-product-price') ?? '0',
-        url: el.getAttribute('href') ?? '',
-        imageUrl: el.querySelector('img')?.getAttribute('src') ?? undefined,
-        category: el.getAttribute('data-product-category')?.trim() ?? undefined,
-      })),
-    )
+    // 3) Llamada con retry/timeout
+    const data = await this.fetchSearchApi(url.toString())
 
-    const maxResults = params.maxResults ?? raw.length
-    const offset = (pageNum - 1) * maxResults
+    // 4) Mapper (lo mejoraremos en A3, pero lo dejamos por ahora)
 
-    const items: ProductListItem[] = raw.slice(0, maxResults).map((item, index) => ({
-      id: item.id,
-      name: item.name,
-      price: parsePrice(item.price),
-      position: offset + index + 1, // Position is global within our paginated result set
-      url: absolutizeUrl(item.url),
-      imageUrl: item.imageUrl,
-      category: item.category,
-    }))
+    const articles = data.articles ?? []
+    const maxResults = params.maxResults ?? articles.length
+    const pageWindow = params.maxResults ?? pageSize
+    const offset = (pageNum - 1) * pageWindow
+
+    const items: ProductListItem[] = articles.slice(0, maxResults).map((a, index) => {
+      const rawPrice = a.promotionalPrice ?? a.originalPrice
+      const price =
+        typeof rawPrice === 'number' && Number.isFinite(rawPrice) ? rawPrice : 0
+
+      if (rawPrice === null) {
+        this.logger.log('warn', 'PCC list item missing price (defaulting to 0)', {
+          id: a.id,
+          slug: a.slug,
+          promotionalPrice: a.promotionalPrice,
+          originalPrice: a.originalPrice,
+        })
+      }
+
+      return {
+        id: a.id,
+        name: a.name,
+        price,
+        position: offset + index + 1,
+        url: `${BASE_URL}/${a.slug}`,
+        imageUrl: a.images?.medium?.path ?? a.images?.small?.path,
+        category: a.mainCategory?.name,
+      }
+    })
 
     return {
       query: params,
-      total: raw.length, // items found on current retailer page (not global total)
+      total: data.total ?? articles.length,
       items,
     }
+  }
+
+  private async fetchSearchApi(apiUrl: string): Promise<ApiResponse> {
+    // Retry simple: 3 intentos, backoff incremental
+    const maxAttempts = 3
+    const baseDelayMs = 500
+    const timeoutMs = 10_000
+
+    let lastErr: unknown
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const data = (await this.page.evaluate(
+          async ({ apiUrl, timeoutMs }) => {
+            const ctrl = new AbortController()
+            const t = setTimeout(() => ctrl.abort(), timeoutMs)
+
+            try {
+              const res = await fetch(apiUrl, {
+                credentials: 'include',
+                signal: ctrl.signal,
+                headers: {
+                  accept: '*/*',
+                  'accept-language': 'es-ES,es;q=0.9',
+                  'content-language': 'es',
+                  'x-selected-language': 'es_ES',
+                },
+              })
+
+              // Reintentar en 429/5xx
+              if (!res.ok) {
+                return { __error: { status: res.status, text: await res.text() } }
+              }
+
+              return res.json()
+            } finally {
+              clearTimeout(t)
+            }
+          },
+          { apiUrl, timeoutMs },
+        )) as ApiEvaluateResult
+
+        if ('__error' in data) {
+          const { status, text } = data.__error
+
+          if (status === 429 || (status >= 500 && status <= 599)) {
+            throw new Error(
+              `Search API retryable error ${status}: ${text.slice(0, 200)}`,
+            )
+          }
+
+          throw new Error(`Search API error ${status}: ${text.slice(0, 200)}`)
+        }
+
+        this.logger.log('debug', 'PCC search API success', {
+          attempt,
+          articles: data.articles?.length ?? 0,
+          total: data.total,
+        })
+        return data
+      } catch (e) {
+        lastErr = e
+        this.logger.log('warn', 'PCC search API attempt failed', {
+          attempt,
+          maxAttempts,
+          error: e instanceof Error ? e.message : String(e),
+        })
+        if (attempt === maxAttempts) break
+        const delay = baseDelayMs * attempt
+        await this.page.waitForTimeout(delay)
+      }
+    }
+
+    throw new Error(
+      `PcComponentes search API failed after ${maxAttempts} attempts. Last error: ${
+        lastErr instanceof Error ? lastErr.message : String(lastErr)
+      }`,
+    )
   }
 }

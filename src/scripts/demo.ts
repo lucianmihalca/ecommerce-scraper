@@ -1,22 +1,22 @@
 import { PcComponentes } from '../PcComponentes'
 
 async function main() {
-  const retailer = new PcComponentes({ headless: true })
+  const retailer = new PcComponentes({ headless: true, logLevel: 'debug' })
 
   try {
-    console.log('⏳ Fetching pages 1 and 2 in parallel...')
-    const [page1, page2] = await Promise.all([
-      retailer.getProductList({
-        keywords: 'ddr5',
-        page: 1,
-        maxResults: 10,
-      }),
-      retailer.getProductList({
-        keywords: 'ddr5',
-        page: 2,
-        maxResults: 10,
-      }),
-    ])
+    console.log('⏳ Fetching page 1...')
+    const page1 = await retailer.getProductList({
+      keywords: 'ddr5',
+      page: 1,
+      maxResults: 10,
+    })
+
+    console.log('⏳ Fetching page 2...')
+    const page2 = await retailer.getProductList({
+      keywords: 'ddr5',
+      page: 2,
+      maxResults: 10,
+    })
 
     console.log('--- PAGE 1 ---')
     console.log(`✅ Query: ${page1.query.keywords}`)
@@ -37,7 +37,7 @@ async function main() {
     )
 
     console.log('\n--- PRODUCT DETAIL (first result) ---')
-    const firstItem = page1.items[0]
+    const firstItem = page1.items[1]
     if (firstItem) {
       const detail = await retailer.getProduct(firstItem)
       console.log(`✅ Name: ${detail.name}`)

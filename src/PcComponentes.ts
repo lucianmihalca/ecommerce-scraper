@@ -24,14 +24,16 @@ export class PcComponentes implements IRetailer {
   async getProductList(params: RetailerSearchParams): Promise<ProductListResult> {
     await this.navigator.open()
     const page = await this.navigator.newPage()
-    const scraper = new ProductListScraper(page)
+    const logger = this.navigator.getLogger()
+    const scraper = new ProductListScraper(page, logger)
     return scraper.scrape(params)
   }
 
   async getProduct(input: string | ProductListItem): Promise<ProductDetail> {
     await this.navigator.open()
     const page = await this.navigator.newPage()
-    const scraper = new ProductDetailScraper(page)
+    const logger = this.navigator.getLogger()
+    const scraper = new ProductDetailScraper(page, logger)
 
     if (typeof input === 'string') {
       return scraper.scrape(input)

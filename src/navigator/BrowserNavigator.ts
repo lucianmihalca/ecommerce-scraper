@@ -1,24 +1,34 @@
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
+import { chromium } from 'playwright-extra'
+import StealthPlugin from 'puppeteer-extra-plugin-stealth'
+import type { Browser, BrowserContext, Page } from 'playwright'
 
+import { createConsoleLogger, silentLogger, type Logger } from '../utils/logger'
 import type { NavigatorConfig } from './navigator.types'
+
+// Stealth plugin patches ~20 browser properties that Cloudflare uses to detect
+// headless Playwright (navigator.webdriver, chrome.runtime, plugins, etc.)
+chromium.use(StealthPlugin())
+
 const DEFAULT_USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 
 export class BrowserNavigator {
   private browser: Browser | null = null
   private context: BrowserContext | null = null
-  private initPromise: Promise<void> | null = null
+  private readonly logger: Logger
 
-  constructor(private readonly config: NavigatorConfig = {}) {}
+  constructor(private readonly config: NavigatorConfig = {}) {
+    this.logger =
+      config.logger ??
+      (config.logLevel ? createConsoleLogger(config.logLevel) : silentLogger)
+  }
+  getLogger(): Logger {
+    return this.logger
+  }
 
-  // Close is defined first so it can be safely referenced inside open()'s catch block.
   async close(): Promise<void> {
-    // We use separate try/finally blocks so that even if closing the context throws,
-    // we still attempt to close the browser and always null out both references.
     try {
-      if (this.context) {
-        await this.context.close()
-      }
+      if (this.context) await this.context.close()
     } finally {
       this.context = null
     }
@@ -31,42 +41,61 @@ export class BrowserNavigator {
   }
 
   async open(): Promise<void> {
-    // Prevent double initialization.
     if (this.browser) return
-    if (this.initPromise) return this.initPromise
 
-    this.initPromise = (async () => {
-      const headless = this.config.headless ?? true
-      const timeoutMs = this.config.timeoutMs ?? 30_000
-      const slowMoMs = this.config.slowMoMs ?? 0
+    const {
+      headless = true, // Run browser without a graphical UI.
+      // true  → browser runs in the background (scraping/servers)
+      // false → browser window is visible (debugging)
 
-      try {
-        this.browser = await chromium.launch({ headless, slowMo: slowMoMs })
+      timeoutMs = 30_000, // Default timeout for navigation and element actions (ms)
 
-        const userAgent = this.config.userAgent ?? DEFAULT_USER_AGENT
+      slowMoMs = 0, // Artificial delay between browser actions (ms).
+      // Example with slowMoMs = 100:
+      // click → wait 100ms → navigate → wait 100ms → type
+      // Mainly useful for debugging.
 
-        //   this.context = await this.browser.newContext()
-        this.context = await this.browser.newContext({ userAgent })
+      userAgent = DEFAULT_USER_AGENT, // Browser identity string used in HTTP requests
 
-        // Apply default timeouts to all pages created from this context.
-        this.context.setDefaultTimeout(timeoutMs)
-        this.context.setDefaultNavigationTimeout(timeoutMs)
-      } catch (error: unknown) {
-        // If initialization fails halfway, clean up any resources already created.
-        await this.close()
-        const message = error instanceof Error ? error.message : String(error)
-        throw new Error(`Failed to initialize BrowserNavigator: ${message}`)
-      } finally {
-        this.initPromise = null
-      }
-    })()
-    return this.initPromise
+      locale, // Browser language (e.g. "es-ES")
+      timezoneId, // Browser timezone (e.g. "Europe/Madrid")
+      viewport, // Browser window size (e.g. { width: 1920, height: 1080 })
+    } = this.config
+
+    try {
+      this.logger.log('debug', 'Launching browser', { headless, slowMoMs })
+
+      this.browser = await chromium.launch({ headless, slowMo: slowMoMs })
+      this.context = await this.browser.newContext({
+        userAgent,
+        locale,
+        timezoneId,
+        viewport,
+      })
+
+      this.context.setDefaultTimeout(timeoutMs)
+      this.context.setDefaultNavigationTimeout(timeoutMs)
+
+      this.logger.log('debug', 'Browser context ready', {
+        timeoutMs,
+        locale,
+        timezoneId,
+        viewport,
+      })
+    } catch (error: unknown) {
+      await this.close()
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger.log('error', 'Failed to initialize BrowserNavigator', { message })
+      throw new Error(`Failed to initialize BrowserNavigator: ${message}`)
+    }
   }
 
   async newPage(): Promise<Page> {
     if (!this.context) {
       throw new Error('BrowserNavigator is not opened. Call open() first.')
     }
-    return this.context.newPage()
+    const page = await this.context.newPage()
+    this.logger.log('debug', 'New page created')
+    return page
   }
 }

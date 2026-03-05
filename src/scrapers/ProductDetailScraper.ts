@@ -1,6 +1,8 @@
 import type { Page } from 'playwright'
 import type { ProductDetail, ProductSpecs } from '../models/ProductDetail'
 import type { ProductListItem } from '../models/ProductListItem'
+import type { Logger } from '../utils/logger'
+import { silentLogger } from '../utils/logger'
 
 const BASE_URL = 'https://www.pccomponentes.com'
 
@@ -114,12 +116,19 @@ function extractPrice(offers: unknown, fallback?: number): number | undefined {
 }
 
 export class ProductDetailScraper {
-  constructor(private readonly page: Page) {}
+  constructor(
+    private readonly page: Page,
+    private readonly logger: Logger = silentLogger,
+  ) {}
 
   async scrape(url: string, base?: Partial<ProductListItem>): Promise<ProductDetail> {
     const absoluteUrl = url.startsWith('http') ? url : `${BASE_URL}${url}`
 
     await this.page.goto(absoluteUrl, { waitUntil: 'domcontentloaded' })
+
+    await this.page.waitForSelector('table.smart-product-table, #description', {
+      timeout: 10000,
+    })
 
     const product = await getJsonLdProduct(this.page)
     if (!product) {
@@ -142,7 +151,31 @@ export class ProductDetailScraper {
     }
 
     const images = extractImages(product)
+
+    const hasText = await this.page
+      .locator('body')
+      .innerText()
+      .then((t) => /especificaciones/i.test(t))
+      .catch(() => false)
+
+    const tableCount = await this.page.locator('table.smart-product-table').count()
+    const headingCount = await this.page
+      .locator('h2, h3')
+      .filter({ hasText: /especific/i })
+      .count()
+    const dlCount = await this.page.locator('dl dt').count()
+
     const specs = await this.extractSpecs()
+
+    this.logger.log('debug', 'PCC PDP specs debug', {
+      url: absoluteUrl,
+      name: productName,
+      hasText,
+      tableCount,
+      headingCount,
+      dlCount,
+      specsCount: Object.keys(specs).length,
+    })
 
     return {
       id: base?.id ?? product.sku ?? product.productID ?? absoluteUrl,
