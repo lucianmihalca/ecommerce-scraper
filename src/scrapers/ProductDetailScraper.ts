@@ -3,6 +3,7 @@ import type { ProductDetail, ProductSpecs } from '../models/ProductDetail'
 import type { ProductListItem } from '../models/ProductListItem'
 import type { Logger } from '../utils/logger'
 import { silentLogger } from '../utils/logger'
+import type { BrowserNavigator } from '../navigator/BrowserNavigator'
 
 const BASE_URL = 'https://www.pccomponentes.com'
 
@@ -117,6 +118,7 @@ function extractPrice(offers: unknown, fallback?: number): number | undefined {
 
 export class ProductDetailScraper {
   constructor(
+    private readonly navigator: BrowserNavigator,
     private readonly page: Page,
     private readonly logger: Logger = silentLogger,
   ) {}
@@ -124,6 +126,7 @@ export class ProductDetailScraper {
   async scrape(url: string, base?: Partial<ProductListItem>): Promise<ProductDetail> {
     const absoluteUrl = url.startsWith('http') ? url : `${BASE_URL}${url}`
 
+    await this.navigator.waitRequestDelay()
     await this.page.goto(absoluteUrl, { waitUntil: 'domcontentloaded' })
 
     await this.page.waitForSelector('table.smart-product-table, #description', {

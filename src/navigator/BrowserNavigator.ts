@@ -15,15 +15,24 @@ const DEFAULT_USER_AGENT =
 export class BrowserNavigator {
   private browser: Browser | null = null
   private context: BrowserContext | null = null
+
   private readonly logger: Logger
+  private readonly requestDelayMs: number
 
   constructor(private readonly config: NavigatorConfig = {}) {
     this.logger =
       config.logger ??
       (config.logLevel ? createConsoleLogger(config.logLevel) : silentLogger)
+
+    this.requestDelayMs = config.requestDelayMs ?? 0
   }
   getLogger(): Logger {
     return this.logger
+  }
+  async waitRequestDelay(): Promise<void> {
+    if (this.requestDelayMs <= 0) return
+
+    await new Promise((resolve) => setTimeout(resolve, this.requestDelayMs))
   }
 
   async close(): Promise<void> {

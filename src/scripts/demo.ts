@@ -1,7 +1,11 @@
 import { PcComponentes } from '../PcComponentes'
 
 async function main() {
-  const retailer = new PcComponentes({ headless: true, logLevel: 'debug' })
+  const retailer = new PcComponentes({
+    headless: true,
+    logLevel: 'debug',
+    requestDelayMs: 1500,
+  })
 
   try {
     console.log('⏳ Fetching page 1...')

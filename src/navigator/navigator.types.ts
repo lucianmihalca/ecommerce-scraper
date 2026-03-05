@@ -19,4 +19,6 @@ export type NavigatorConfig = {
   // Optional: logging
   logger?: Logger
   logLevel?: LogLevel
+
+  requestDelayMs?: number
 }
