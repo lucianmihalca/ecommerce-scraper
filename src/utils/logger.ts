@@ -16,7 +16,7 @@ export function createConsoleLogger(minLevel: LogLevel = 'info'): Logger {
     log(level, message, meta) {
       if (order[level] < min) return
       const payload = meta ? ` ${JSON.stringify(meta)}` : ''
-      // eslint-disable-next-line no-console
+      /* eslint-disable no-console */
       ;(level === 'error'
         ? console.error
         : level === 'warn'
@@ -24,4 +24,14 @@ export function createConsoleLogger(minLevel: LogLevel = 'info'): Logger {
           : console.log)(`[${level.toUpperCase()}] ${message}${payload}`)
     },
   }
+}
+
+export function resolveLogger(config: {
+  logger?: Logger
+  logLevel?: LogLevel
+}): Logger {
+  return (
+    config.logger ??
+    (config.logLevel ? createConsoleLogger(config.logLevel) : silentLogger)
+  )
 }

@@ -1,13 +1,10 @@
 import type { Page } from 'playwright'
-import type { ProductListItem } from '../models/ProductListItem'
-import type { ProductListResult } from '../models/ProductListResult'
-import type { RetailerSearchParams } from '../models/RetailerSearchParams'
-import { type Logger, silentLogger } from '../utils/logger'
-import type { BrowserNavigator } from '../navigator/BrowserNavigator'
-
-const BASE_URL = 'https://www.pccomponentes.com'
-const API_BASE = `${BASE_URL}/api/articles/search`
-const DEFAULT_PAGE_SIZE = 40
+import type { ProductListItem } from '../../../models/ProductListItem'
+import type { ProductListResult } from '../../../models/ProductListResult'
+import type { RetailerSearchParams } from '../../../models/RetailerSearchParams'
+import { type Logger, silentLogger } from '../../../utils/logger'
+import type { BrowserNavigator } from '../../../navigator/BrowserNavigator'
+import { API_BASE, BASE_URL, DEFAULT_PAGE_SIZE } from '../constants'
 
 type ApiArticleImage = {
   path: string
@@ -41,7 +38,7 @@ type ApiResponse = {
 type ApiErrorPayload = { __error: { status: number; text: string } }
 type ApiEvaluateResult = ApiResponse | ApiErrorPayload
 
-export class ProductListScraper {
+export class ListScraper {
   // Page is kept for consistency with the IRetailer architecture.
   // We use its browser context to inherit Cloudflare cookies.
   constructor(
@@ -185,7 +182,6 @@ export class ProductListScraper {
           error: e instanceof Error ? e.message : String(e),
         })
         if (attempt === maxAttempts) break
-        await this.navigator.waitRequestDelay()
         const delay = baseDelayMs * attempt
         await this.page.waitForTimeout(delay)
       }

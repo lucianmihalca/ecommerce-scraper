@@ -1,4 +1,5 @@
-import { PcComponentes } from '../PcComponentes'
+/* eslint-disable no-console */
+import { PcComponentes } from '../index'
 
 async function main() {
   const retailer = new PcComponentes({
