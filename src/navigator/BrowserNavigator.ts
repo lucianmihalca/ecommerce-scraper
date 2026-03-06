@@ -2,7 +2,7 @@ import { chromium } from 'playwright-extra'
 import StealthPlugin from 'puppeteer-extra-plugin-stealth'
 import type { Browser, BrowserContext, Page } from 'playwright'
 
-import { createConsoleLogger, silentLogger, type Logger } from '../utils/logger'
+import { resolveLogger, type Logger } from '../utils/logger'
 import type { NavigatorConfig } from './navigator.types'
 
 // Stealth plugin patches ~20 browser properties that Cloudflare uses to detect
@@ -20,15 +20,11 @@ export class BrowserNavigator {
   private readonly requestDelayMs: number
 
   constructor(private readonly config: NavigatorConfig = {}) {
-    this.logger =
-      config.logger ??
-      (config.logLevel ? createConsoleLogger(config.logLevel) : silentLogger)
+    this.logger = resolveLogger(config)
 
     this.requestDelayMs = config.requestDelayMs ?? 0
   }
-  getLogger(): Logger {
-    return this.logger
-  }
+
   async waitRequestDelay(): Promise<void> {
     if (this.requestDelayMs <= 0) return
 

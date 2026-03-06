@@ -25,3 +25,13 @@ export function createConsoleLogger(minLevel: LogLevel = 'info'): Logger {
     },
   }
 }
+
+export function resolveLogger(config: {
+  logger?: Logger
+  logLevel?: LogLevel
+}): Logger {
+  return (
+    config.logger ??
+    (config.logLevel ? createConsoleLogger(config.logLevel) : silentLogger)
+  )
+}

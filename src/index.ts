@@ -6,4 +6,4 @@ export type { NavigatorConfig } from './navigator/navigator.types'
 export type { IRetailer } from './interfaces/IRetailer'
 
 export { BrowserNavigator } from './navigator/BrowserNavigator'
-export { PcComponentes } from './PcComponentes'
+export { PcComponentes } from './retailers/pccomponentes'

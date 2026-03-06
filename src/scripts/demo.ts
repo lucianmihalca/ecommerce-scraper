@@ -1,4 +1,4 @@
-import { PcComponentes } from '../PcComponentes'
+import { PcComponentes } from '../index'
 
 async function main() {
   const retailer = new PcComponentes({
