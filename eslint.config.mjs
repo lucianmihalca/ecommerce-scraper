@@ -16,7 +16,7 @@ export default [
       '@typescript-eslint': tseslint,
     },
     rules: {
-      'no-console': 'off',
+      'no-console': 'error',
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
       '@typescript-eslint/consistent-type-imports': ['error'],
     },

@@ -16,7 +16,7 @@ export function createConsoleLogger(minLevel: LogLevel = 'info'): Logger {
     log(level, message, meta) {
       if (order[level] < min) return
       const payload = meta ? ` ${JSON.stringify(meta)}` : ''
-      // eslint-disable-next-line no-console
+      /* eslint-disable no-console */
       ;(level === 'error'
         ? console.error
         : level === 'warn'
