@@ -10,6 +10,7 @@ Built around a clean `IRetailer` interface, it separates browser navigation, pag
 - Extract full product detail (specs, images, description, brand, SKU)
 - Clean public API — consumers only interact with `PcComponentes`
 - Headless or headed browser mode via Playwright
+- Configurable request delay and log level
 - Easily extensible to other retailers via the `IRetailer` interface
 
 ## Why PcComponentes
@@ -20,7 +21,7 @@ custom user agent — a non-trivial challenge compared to scraping unprotected s
 
 Product data is extracted using two complementary strategies:
 
-- **Search results** — stable `data-*` attributes embedded directly in the HTML
+- **Search results** — internal JSON API called within the page context to inherit Cloudflare cookies, with automatic retry and backoff
 - **Product detail** — Schema.org JSON-LD structured data maintained for SEO,
   with two-layer DOM fallbacks for resilience against inconsistent layouts:
   - Description: falls back to `#description` block when JSON-LD quality is too low
@@ -48,9 +49,13 @@ pnpm build
 ## Quick Start
 
 ```ts
-import { PcComponentes } from './src/PcComponentes'
+import { PcComponentes } from './src/index'
 
-const retailer = new PcComponentes({ headless: true })
+const retailer = new PcComponentes({
+  headless: true,
+  logLevel: 'info',
+  requestDelayMs: 1500,
+})
 
 // Search products
 const result = await retailer.getProductList({ keywords: 'ddr5', page: 1, maxResults: 5 })
@@ -76,6 +81,14 @@ pnpm demo
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `headless` | `boolean` | `true` | Run browser in headless mode |
+| `logLevel` | `'debug' \| 'info' \| 'warn' \| 'error'` | silent | Minimum log level |
+| `requestDelayMs` | `number` | `0` | Delay between requests in ms |
+| `timeoutMs` | `number` | `30000` | Navigation and action timeout |
+| `slowMoMs` | `number` | `0` | Artificial delay between browser actions (useful for debugging) |
+| `userAgent` | `string` | Chrome 120 | Browser user agent string |
+| `locale` | `string` | — | Browser language (e.g. `'es-ES'`) |
+| `timezoneId` | `string` | — | Browser timezone (e.g. `'Europe/Madrid'`) |
+| `viewport` | `{ width, height }` | — | Browser window size |
 
 ### `getProductList(params): Promise<ProductListResult>`
 
@@ -84,7 +97,6 @@ pnpm demo
 | `keywords` | `string` | Search query |
 | `page` | `number?` | Page number (default: 1) |
 | `maxResults` | `number?` | Max items to return |
-| `category` | `string?` | Filter by category |
 
 ### `getProduct(input): Promise<ProductDetail>`
 
@@ -98,37 +110,50 @@ Closes the browser instance. Always call this when done.
 
 ```
 src/
-├── PcComponentes.ts          # Public API — implements IRetailer
-├── index.ts                  # Module entry point
+├── index.ts                        # Public barrel — exports all types and retailers
 ├── interfaces/
-│   └── IRetailer.ts          # Retailer contract
+│   └── IRetailer.ts                # Retailer contract
 ├── models/
-│   ├── ProductListItem.ts    # Listing-level product data
-│   ├── ProductDetail.ts      # Full product detail (extends ProductListItem)
-│   ├── ProductListResult.ts  # Search result wrapper
+│   ├── ProductListItem.ts          # Listing-level product data
+│   ├── ProductDetail.ts            # Full product detail (extends ProductListItem)
+│   ├── ProductListResult.ts        # Search result wrapper
 │   └── RetailerSearchParams.ts
 ├── navigator/
-│   ├── BrowserNavigator.ts   # Playwright browser/page lifecycle
+│   ├── BrowserNavigator.ts         # Playwright browser/page lifecycle
 │   └── navigator.types.ts
-├── scrapers/
-│   ├── ProductListScraper.ts # Extracts product cards from search pages
-│   └── ProductDetailScraper.ts # Extracts detail via JSON-LD + DOM fallbacks (description & specs)
+├── retailers/
+│   └── pccomponentes/
+│       ├── index.ts                # PcComponentes — implements IRetailer
+│       ├── scrapers/
+│       │   ├── ListScraper.ts      # Extracts product cards via internal API
+│       │   └── DetailScraper.ts    # Extracts detail via JSON-LD + DOM fallbacks
+│       ├── jsonld.ts               # Schema.org JSON-LD parsing helpers
+│       └── constants.ts            # BASE_URL, API_BASE, page size
+├── utils/
+│   └── logger.ts                   # Logger interface, console logger, resolveLogger
 └── scripts/
-    └── demo.ts               # End-to-end usage example
+    └── demo.ts                     # End-to-end usage example
 ```
 
 ## Extending to Other Retailers
 
-Implement the `IRetailer` interface to add support for a new retailer:
+Create a new folder under `retailers/` and implement the `IRetailer` interface:
 
 ```ts
-import type { IRetailer } from './interfaces/IRetailer'
+// src/retailers/myretailer/index.ts
+import type { IRetailer } from '../../interfaces/IRetailer'
 
 export class MyRetailer implements IRetailer {
   async getProductList(params) { /* ... */ }
   async getProduct(input)      { /* ... */ }
   async close()                { /* ... */ }
 }
+```
+
+Then export it from `src/index.ts`:
+
+```ts
+export { MyRetailer } from './retailers/myretailer'
 ```
 
 ## Scripts
