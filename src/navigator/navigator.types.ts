@@ -10,13 +10,6 @@ export type NavigatorConfig = {
   timezoneId?: string
   viewport?: { width: number; height: number }
 
-  // Optional: keep cookies/profile between runs
-  persistentProfileDir?: string
-
-  // Optional: debug
-  logResponses?: boolean
-
-  // Optional: logging
   logger?: Logger
   logLevel?: LogLevel
 
