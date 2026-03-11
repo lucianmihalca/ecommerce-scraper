@@ -33,7 +33,8 @@ Product data is extracted using two complementary strategies:
 |---|---|
 | Node.js v18+ | Runtime |
 | TypeScript | Type safety |
-| Playwright | Browser automation |
+| Playwright + playwright-extra | Browser automation |
+| puppeteer-extra-plugin-stealth | Cloudflare fingerprint evasion |
 | pnpm | Package manager |
 
 ## Installation
@@ -82,6 +83,7 @@ pnpm demo
 |---|---|---|---|
 | `headless` | `boolean` | `true` | Run browser in headless mode |
 | `logLevel` | `'debug' \| 'info' \| 'warn' \| 'error'` | silent | Minimum log level |
+| `logger` | `Logger` | — | Custom logger instance (overrides `logLevel`) |
 | `requestDelayMs` | `number` | `0` | Delay between requests in ms |
 | `timeoutMs` | `number` | `30000` | Navigation and action timeout |
 | `slowMoMs` | `number` | `0` | Artificial delay between browser actions (useful for debugging) |
@@ -95,8 +97,16 @@ pnpm demo
 | Param | Type | Description |
 |---|---|---|
 | `keywords` | `string` | Search query |
-| `page` | `number?` | Page number (default: 1) |
-| `maxResults` | `number?` | Max items to return |
+| `page` | `number?` | 1-based page number (default: `1`) |
+| `maxResults` | `number?` | Items per page. Must be an integer between `1` and `40` (`MAX_API_PAGE_SIZE`) |
+
+Pagination contract:
+
+- `page` and `maxResults` are sent to PcComponentes search API (`/api/articles/search`).
+- `total` is the global number of matching products for the query.
+- `items` includes only the current page.
+- `position` is continuous for the selected page size (`maxResults`), e.g. with `maxResults=10`: page 1 -> `1..10`, page 2 -> `11..20`.
+- invalid `page` / `maxResults` values fail fast with a validation error (no silent clamping).
 
 ### `getProduct(input): Promise<ProductDetail>`
 
@@ -128,7 +138,7 @@ src/
 │       │   ├── ListScraper.ts      # Extracts product cards via internal API
 │       │   └── DetailScraper.ts    # Extracts detail via JSON-LD + DOM fallbacks
 │       ├── jsonld.ts               # Schema.org JSON-LD parsing helpers
-│       └── constants.ts            # BASE_URL, API_BASE, page size
+│       └── constants.ts            # BASE_URL, API_BASE, MAX_API_PAGE_SIZE
 ├── utils/
 │   └── logger.ts                   # Logger interface, console logger, resolveLogger
 └── scripts/

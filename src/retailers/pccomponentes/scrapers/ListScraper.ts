@@ -4,7 +4,7 @@ import type { ProductListResult } from '../../../models/ProductListResult'
 import type { RetailerSearchParams } from '../../../models/RetailerSearchParams'
 import { type Logger, silentLogger } from '../../../utils/logger'
 import type { BrowserNavigator } from '../../../navigator/BrowserNavigator'
-import { API_BASE, BASE_URL, DEFAULT_PAGE_SIZE } from '../constants'
+import { API_BASE, BASE_URL, MAX_API_PAGE_SIZE } from '../constants'
 
 type ApiArticleImage = {
   path: string
@@ -38,6 +38,12 @@ type ApiResponse = {
 type ApiErrorPayload = { __error: { status: number; text: string } }
 type ApiEvaluateResult = ApiResponse | ApiErrorPayload
 
+type SearchApiUrlParams = {
+  query: string
+  pageNumber: number
+  pageSize: number
+}
+
 export class ListScraper {
   // Page is kept for consistency with the IRetailer architecture.
   // We use its browser context to inherit Cloudflare cookies.
@@ -48,72 +54,139 @@ export class ListScraper {
   ) {}
 
   async scrape(params: RetailerSearchParams): Promise<ProductListResult> {
-    const pageNum = params.page ?? 1
-    const pageSize = DEFAULT_PAGE_SIZE
-    const query = params.keywords.trim()
+    const pageNumber = this.resolvePageNumber(params.page)
+    const pageSize = this.resolveMaxResults(params.maxResults, MAX_API_PAGE_SIZE)
+    const query = this.normalizeQuery(params.keywords)
+    const maxResults = pageSize
 
     this.logger.log('debug', 'PCC list scraper start', {
       query,
-      page: pageNum,
+      page: pageNumber,
+      maxResults,
     })
 
     await this.navigator.waitRequestDelay()
-    // 1) Bootstrap cookies (lo dejamos igual por ahora)
-    await this.page.goto(`${BASE_URL}/buscar/?query=${encodeURIComponent(query)}`, {
-      waitUntil: 'domcontentloaded',
-    })
+    await this.bootstrapSearchContext(query)
 
-    const url = new URL(API_BASE)
-    url.searchParams.set('query', query)
-    url.searchParams.set('sort', 'relevance')
-    url.searchParams.set('sortVersion', 'default')
-    url.searchParams.set('channel', 'es')
-    url.searchParams.set('page', String(pageNum))
-    url.searchParams.set('pageSize', String(pageSize))
-    url.searchParams.set('analytics', 'true')
-    url.searchParams.set('showOem', 'false')
+    const apiUrl = this.buildSearchApiUrl({
+      query,
+      pageNumber,
+      pageSize,
+    })
 
     // 3) Llamada con retry/timeout
     await this.navigator.waitRequestDelay()
-    const data = await this.fetchSearchApi(url.toString())
+    const apiResponse = await this.fetchSearchApi(apiUrl)
 
     // 4) Mapper (lo mejoraremos en A3, pero lo dejamos por ahora)
+    const articles = apiResponse.articles ?? []
+    const globalOffset = (pageNumber - 1) * pageSize
 
-    const articles = data.articles ?? []
-    const maxResults = params.maxResults ?? articles.length
-    const pageWindow = params.maxResults ?? pageSize
-    const offset = (pageNum - 1) * pageWindow
-
-    const items: ProductListItem[] = articles.slice(0, maxResults).map((a, index) => {
-      const rawPrice = a.promotionalPrice ?? a.originalPrice
-      const price =
-        typeof rawPrice === 'number' && Number.isFinite(rawPrice) ? rawPrice : 0
-
-      if (rawPrice === null) {
-        this.logger.log('warn', 'PCC list item missing price (defaulting to 0)', {
-          id: a.id,
-          slug: a.slug,
-          promotionalPrice: a.promotionalPrice,
-          originalPrice: a.originalPrice,
-        })
-      }
-
-      return {
-        id: a.id,
-        name: a.name,
-        price,
-        position: offset + index + 1,
-        url: `${BASE_URL}/${a.slug}`,
-        imageUrl: a.images?.medium?.path ?? a.images?.small?.path,
-        category: a.mainCategory?.name,
-      }
-    })
+    const items: ProductListItem[] = articles
+      .slice(0, maxResults)
+      .map((article, index) =>
+        this.mapArticleToProductListItem(article, globalOffset + index + 1),
+      )
 
     return {
-      query: params,
-      total: data.total ?? articles.length,
+      query: {
+        ...params,
+        keywords: query,
+        page: pageNumber,
+        maxResults,
+      },
+      total: apiResponse.total ?? articles.length,
       items,
     }
+  }
+
+  private normalizeQuery(rawKeywords: string): string {
+    const normalizedQuery = rawKeywords.trim()
+    if (!normalizedQuery) {
+      throw new Error('RetailerSearchParams.keywords must be a non-empty string.')
+    }
+    return normalizedQuery
+  }
+
+  private resolvePageNumber(page: number | undefined): number {
+    if (page === undefined) return 1
+    if (!Number.isInteger(page) || page < 1) {
+      throw new Error('RetailerSearchParams.page must be an integer greater than 0.')
+    }
+    return page
+  }
+
+  private resolveMaxResults(
+    requestedMaxResults: number | undefined,
+    pageSize: number,
+  ): number {
+    if (requestedMaxResults === undefined) return pageSize
+
+    if (!Number.isInteger(requestedMaxResults) || requestedMaxResults < 1) {
+      throw new Error(
+        'RetailerSearchParams.maxResults must be an integer greater than 0.',
+      )
+    }
+    if (requestedMaxResults > pageSize) {
+      throw new Error(
+        `RetailerSearchParams.maxResults must be <= ${pageSize}. Received: ${requestedMaxResults}.`,
+      )
+    }
+
+    return requestedMaxResults
+  }
+
+  private async bootstrapSearchContext(query: string): Promise<void> {
+    await this.page.goto(`${BASE_URL}/buscar/?query=${encodeURIComponent(query)}`, {
+      waitUntil: 'domcontentloaded',
+    })
+  }
+
+  private buildSearchApiUrl(params: SearchApiUrlParams): string {
+    const url = new URL(API_BASE)
+    url.searchParams.set('query', params.query)
+    url.searchParams.set('sort', 'relevance')
+    url.searchParams.set('sortVersion', 'default')
+    url.searchParams.set('channel', 'es')
+    url.searchParams.set('page', String(params.pageNumber))
+    url.searchParams.set('pageSize', String(params.pageSize))
+    url.searchParams.set('analytics', 'true')
+    url.searchParams.set('showOem', 'false')
+    return url.toString()
+  }
+
+  private mapArticleToProductListItem(
+    article: ApiArticle,
+    position: number,
+  ): ProductListItem {
+    const normalizedSlug = article.slug.replace(/^\/+/, '')
+
+    return {
+      id: article.id,
+      name: article.name,
+      price: this.resolveArticlePrice(article),
+      position,
+      url: `${BASE_URL}/${normalizedSlug}`,
+      imageUrl: article.images?.medium?.path ?? article.images?.small?.path,
+      category: article.mainCategory?.name,
+    }
+  }
+
+  private resolveArticlePrice(article: ApiArticle): number {
+    const candidatePrice = article.promotionalPrice ?? article.originalPrice
+    const hasValidPrice =
+      typeof candidatePrice === 'number' && Number.isFinite(candidatePrice)
+
+    if (hasValidPrice) return candidatePrice
+
+    this.logger.log('warn', 'PCC list item missing/invalid price (defaulting to 0)', {
+      id: article.id,
+      slug: article.slug,
+      promotionalPrice: article.promotionalPrice,
+      originalPrice: article.originalPrice,
+    })
+
+    return 0
   }
 
   private async fetchSearchApi(apiUrl: string): Promise<ApiResponse> {
@@ -126,15 +199,15 @@ export class ListScraper {
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        const data = (await this.page.evaluate(
+        const apiResult = (await this.page.evaluate(
           async ({ apiUrl, timeoutMs }) => {
-            const ctrl = new AbortController()
-            const t = setTimeout(() => ctrl.abort(), timeoutMs)
+            const abortController = new AbortController()
+            const abortTimeout = setTimeout(() => abortController.abort(), timeoutMs)
 
             try {
-              const res = await fetch(apiUrl, {
+              const response = await fetch(apiUrl, {
                 credentials: 'include',
-                signal: ctrl.signal,
+                signal: abortController.signal,
                 headers: {
                   accept: '*/*',
                   'accept-language': 'es-ES,es;q=0.9',
@@ -143,21 +216,22 @@ export class ListScraper {
                 },
               })
 
-              // Reintentar en 429/5xx
-              if (!res.ok) {
-                return { __error: { status: res.status, text: await res.text() } }
+              if (!response.ok) {
+                return {
+                  __error: { status: response.status, text: await response.text() },
+                }
               }
 
-              return res.json()
+              return response.json()
             } finally {
-              clearTimeout(t)
+              clearTimeout(abortTimeout)
             }
           },
           { apiUrl, timeoutMs },
         )) as ApiEvaluateResult
 
-        if ('__error' in data) {
-          const { status, text } = data.__error
+        if ('__error' in apiResult) {
+          const { status, text } = apiResult.__error
 
           if (status === 429 || (status >= 500 && status <= 599)) {
             throw new Error(
@@ -170,20 +244,20 @@ export class ListScraper {
 
         this.logger.log('debug', 'PCC search API success', {
           attempt,
-          articles: data.articles?.length ?? 0,
-          total: data.total,
+          articles: apiResult.articles?.length ?? 0,
+          total: apiResult.total,
         })
-        return data
-      } catch (e) {
-        lastErr = e
+        return apiResult
+      } catch (error: unknown) {
+        lastErr = error
         this.logger.log('warn', 'PCC search API attempt failed', {
           attempt,
           maxAttempts,
-          error: e instanceof Error ? e.message : String(e),
+          error: error instanceof Error ? error.message : String(error),
         })
         if (attempt === maxAttempts) break
-        const delay = baseDelayMs * attempt
-        await this.page.waitForTimeout(delay)
+        const retryDelayMs = baseDelayMs * attempt
+        await this.page.waitForTimeout(retryDelayMs)
       }
     }
 
