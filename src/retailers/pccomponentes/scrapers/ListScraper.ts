@@ -74,11 +74,9 @@ export class ListScraper {
       pageSize,
     })
 
-    // 3) Llamada con retry/timeout
     await this.navigator.waitRequestDelay()
     const apiResponse = await this.fetchSearchApi(apiUrl)
 
-    // 4) Mapper (lo mejoraremos en A3, pero lo dejamos por ahora)
     const articles = apiResponse.articles ?? []
     const globalOffset = (pageNumber - 1) * pageSize
 
@@ -190,7 +188,6 @@ export class ListScraper {
   }
 
   private async fetchSearchApi(apiUrl: string): Promise<ApiResponse> {
-    // Retry simple: 3 intentos, backoff incremental
     const maxAttempts = 3
     const baseDelayMs = 500
     const timeoutMs = 10_000
