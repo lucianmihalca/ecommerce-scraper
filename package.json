@@ -7,7 +7,8 @@
     "lint": "eslint src",
     "build": "tsc",
     "build:watch": "tsc --watch",
-    "demo": "node dist/scripts/demo.js"
+    "demo": "node dist/scripts/demo.js",
+    "test": "vitest run"
   },
   "keywords": [],
   "author": "Lucian Mihalca",
@@ -19,7 +20,8 @@
     "@typescript-eslint/parser": "^8.56.0",
     "eslint": "^9.39.3",
     "playwright": "^1.58.2",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
   },
   "dependencies": {
     "playwright-extra": "^4.3.6",
