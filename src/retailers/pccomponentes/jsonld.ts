@@ -28,17 +28,21 @@ function safeJsonParse(text: string): unknown | null {
   }
 }
 
-function toArray<T>(v: T | T[] | undefined): T[] {
-  if (!v) return []
-  return Array.isArray(v) ? v : [v]
+function toArray<T>(value: T | T[] | undefined): T[] {
+  if (!value) return []
+  return Array.isArray(value) ? value : [value]
 }
 
 function isProductNode(node: unknown): node is JsonLdProduct {
   if (typeof node !== 'object' || node === null) return false
-  const t = (node as Record<string, unknown>)['@type']
-  if (!t) return false
-  if (Array.isArray(t)) return t.map(String).some((x) => x.toLowerCase() === 'product')
-  return String(t).toLowerCase() === 'product'
+  const typeField = (node as Record<string, unknown>)['@type']
+  if (!typeField) return false
+  if (Array.isArray(typeField)) {
+    return typeField
+      .map(String)
+      .some((typeName) => typeName.toLowerCase() === 'product')
+  }
+  return String(typeField).toLowerCase() === 'product'
 }
 
 function extractNodes(parsed: unknown): unknown[] {
@@ -87,24 +91,25 @@ export function extractBrand(product: JsonLdProduct): string | undefined {
 
 export function extractImages(product: JsonLdProduct): string[] {
   return toArray(product.image)
-    .map((x) => String(x))
+    .map((imageValue) => String(imageValue))
     .filter(Boolean)
 }
 
 export function extractPrice(offers: unknown, fallback?: number): number | undefined {
   if (typeof fallback === 'number' && Number.isFinite(fallback)) return fallback
 
-  const obj = Array.isArray(offers)
+  const offersObject = Array.isArray(offers)
     ? offers[0]
     : typeof offers === 'object' && offers !== null
       ? offers
       : null
 
-  if (obj && typeof obj === 'object') {
-    const o = obj as Record<string, unknown>
-    const candidate = o['lowPrice'] ?? o['price'] ?? o['highPrice']
-    const n = Number.parseFloat(String(candidate ?? 'NaN'))
-    if (Number.isFinite(n)) return n
+  if (offersObject && typeof offersObject === 'object') {
+    const offerRecord = offersObject as Record<string, unknown>
+    const candidatePrice =
+      offerRecord['lowPrice'] ?? offerRecord['price'] ?? offerRecord['highPrice']
+    const parsedPrice = Number.parseFloat(String(candidatePrice ?? 'NaN'))
+    if (Number.isFinite(parsedPrice)) return parsedPrice
   }
 
   return undefined

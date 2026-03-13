@@ -14,7 +14,14 @@ export class DetailScraper {
     private readonly logger: Logger = silentLogger,
   ) {}
 
-  async scrape(url: string, base?: Partial<ProductListItem>): Promise<ProductDetail> {
+  /**
+   * @param listItemContext - Optional data from the list scrape (id, price, position…)
+   * used as fallback when the product page JSON-LD is incomplete.
+   */
+  async scrape(
+    url: string,
+    listItemContext?: Partial<ProductListItem>,
+  ): Promise<ProductDetail> {
     const absoluteUrl = url.startsWith('http') ? url : `${BASE_URL}${url}`
 
     await this.navigator.waitRequestDelay()
@@ -30,7 +37,7 @@ export class DetailScraper {
     }
 
     // Description: JSON-LD by default, DOM fallback only if low quality (index 0 case)
-    const productName = (product.name?.trim() ?? base?.name ?? '').trim()
+    const productName = (product.name?.trim() ?? listItemContext?.name ?? '').trim()
     const jsonLdDescription = (product.description ?? '').trim()
 
     let description = jsonLdDescription
@@ -39,7 +46,7 @@ export class DetailScraper {
       if (domDescription) description = domDescription
     }
 
-    const price = extractPrice(product.offers, base?.price)
+    const price = extractPrice(product.offers, listItemContext?.price)
     if (typeof price !== 'number') {
       throw new Error(`Product price not found or invalid at: ${absoluteUrl}`)
     }
@@ -72,13 +79,13 @@ export class DetailScraper {
     })
 
     return {
-      id: base?.id ?? product.sku ?? product.productID ?? absoluteUrl,
+      id: listItemContext?.id ?? product.sku ?? product.productID ?? absoluteUrl,
       name: productName,
       price,
       url: product.url ?? absoluteUrl,
-      position: base?.position ?? 0,
-      imageUrl: base?.imageUrl ?? images[0] ?? undefined,
-      category: product.category?.trim() ?? base?.category,
+      position: listItemContext?.position ?? 0,
+      imageUrl: listItemContext?.imageUrl ?? images[0] ?? undefined,
+      category: product.category?.trim() ?? listItemContext?.category,
       brand: extractBrand(product),
       description,
       images,
