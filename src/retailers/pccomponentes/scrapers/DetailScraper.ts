@@ -4,7 +4,7 @@ import type { ProductListItem } from '../../../models/ProductListItem'
 import type { Logger } from '../../../utils/logger'
 import { silentLogger } from '../../../utils/logger'
 import type { BrowserNavigator } from '../../../navigator/BrowserNavigator'
-import { BASE_URL } from '../constants'
+import { isLowQualityDescription, resolveAbsoluteUrl } from './DetailScraper.helpers'
 import { extractBrand, extractImages, extractPrice, getJsonLdProduct } from '../jsonld'
 
 export class DetailScraper {
@@ -22,7 +22,7 @@ export class DetailScraper {
     url: string,
     listItemContext?: Partial<ProductListItem>,
   ): Promise<ProductDetail> {
-    const absoluteUrl = url.startsWith('http') ? url : `${BASE_URL}${url}`
+    const absoluteUrl = resolveAbsoluteUrl(url)
 
     await this.navigator.waitRequestDelay()
     await this.page.goto(absoluteUrl, { waitUntil: 'domcontentloaded' })
@@ -41,7 +41,7 @@ export class DetailScraper {
     const jsonLdDescription = (product.description ?? '').trim()
 
     let description = jsonLdDescription
-    if (this.isLowQualityDescription(jsonLdDescription, productName)) {
+    if (isLowQualityDescription(jsonLdDescription, productName)) {
       const domDescription = await this.extractDescriptionFromDescriptionBlock()
       if (domDescription) description = domDescription
     }
@@ -92,34 +92,6 @@ export class DetailScraper {
       specs,
       sku: product.sku,
     }
-  }
-
-  // -------------------------
-  // Description helpers
-  // -------------------------
-
-  private isLowQualityDescription(description: string, productName: string): boolean {
-    const normalizedDescription = description.trim().toLowerCase()
-    const normalizedName = productName.trim().toLowerCase()
-
-    if (!normalizedDescription) return true
-
-    const cssLikeBlockPattern = /\{[^}]*:[^}]*\}/
-    const containsCssMarkers =
-      normalizedDescription.startsWith('@font-face') ||
-      normalizedDescription.includes('font-family') ||
-      normalizedDescription.includes('src: url(') ||
-      cssLikeBlockPattern.test(normalizedDescription)
-
-    if (containsCssMarkers) return true
-
-    // Detect "name repeated many times" (common bad JSON-LD on some products)
-    if (normalizedName) {
-      const occurrences = normalizedDescription.split(normalizedName).length - 1
-      if (occurrences >= 2) return true
-    }
-
-    return false
   }
 
   /**
