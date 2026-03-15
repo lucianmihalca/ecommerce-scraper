@@ -4,49 +4,19 @@ import type { ProductListResult } from '../../../models/ProductListResult'
 import type { RetailerSearchParams } from '../../../models/RetailerSearchParams'
 import { type Logger, silentLogger } from '../../../utils/logger'
 import type { BrowserNavigator } from '../../../navigator/BrowserNavigator'
-import { API_BASE, BASE_URL, MAX_API_PAGE_SIZE } from '../constants'
-
-type ApiArticleImage = {
-  path: string
-  width: number
-  height: number
-}
-
-type ApiArticle = {
-  id: string
-  name: string
-  slug: string
-  brandName?: string
-  promotionalPrice?: number
-  originalPrice?: number
-  images?: {
-    small?: ApiArticleImage
-    medium?: ApiArticleImage
-    large?: ApiArticleImage
-  }
-  mainCategory?: {
-    name?: string
-    slug?: string
-  }
-}
-
-type ApiResponse = {
-  articles?: ApiArticle[]
-  total?: number
-}
-
-type ApiErrorPayload = { __error: { status: number; text: string } }
-type ApiEvaluateResult = ApiResponse | ApiErrorPayload
-
-type SearchApiUrlParams = {
-  query: string
-  pageNumber: number
-  pageSize: number
-}
+import { BASE_URL, MAX_API_PAGE_SIZE } from '../constants'
+import {
+  normalizeQuery,
+  resolvePageNumber,
+  resolveMaxResults,
+  buildSearchApiUrl,
+  mapArticleToProductListItem,
+  type ApiResponse,
+  type ApiEvaluateResult,
+  type ApiErrorPayload,
+} from './ListScraper.helpers'
 
 export class ListScraper {
-  // Page is kept for consistency with the IRetailer architecture.
-  // We use its browser context to inherit Cloudflare cookies.
   constructor(
     private readonly navigator: BrowserNavigator,
     private readonly page: Page,
@@ -54,10 +24,11 @@ export class ListScraper {
   ) {}
 
   async scrape(params: RetailerSearchParams): Promise<ProductListResult> {
-    const pageNumber = this.resolvePageNumber(params.page)
-    const pageSize = this.resolveMaxResults(params.maxResults, MAX_API_PAGE_SIZE)
-    const query = this.normalizeQuery(params.keywords)
-    const maxResults = pageSize
+    const pageNumber = resolvePageNumber(params.page)
+    const query = normalizeQuery(params.keywords)
+
+    const maxResults = resolveMaxResults(params.maxResults, MAX_API_PAGE_SIZE)
+    const pageSize = maxResults
 
     this.logger.log('debug', 'PCC list scraper start', {
       query,
@@ -66,9 +37,9 @@ export class ListScraper {
     })
 
     await this.navigator.waitRequestDelay()
-    await this.bootstrapSearchContext(query)
+    await this.openSearchPageForSession(query)
 
-    const apiUrl = this.buildSearchApiUrl({
+    const apiUrl = buildSearchApiUrl({
       query,
       pageNumber,
       pageSize,
@@ -83,7 +54,7 @@ export class ListScraper {
     const items: ProductListItem[] = articles
       .slice(0, maxResults)
       .map((article, index) =>
-        this.mapArticleToProductListItem(article, globalOffset + index + 1),
+        mapArticleToProductListItem(article, globalOffset + index + 1, this.logger),
       )
 
     return {
@@ -98,93 +69,12 @@ export class ListScraper {
     }
   }
 
-  private normalizeQuery(rawKeywords: string): string {
-    const normalizedQuery = rawKeywords.trim()
-    if (!normalizedQuery) {
-      throw new Error('RetailerSearchParams.keywords must be a non-empty string.')
-    }
-    return normalizedQuery
-  }
-
-  private resolvePageNumber(page: number | undefined): number {
-    if (page === undefined) return 1
-    if (!Number.isInteger(page) || page < 1) {
-      throw new Error('RetailerSearchParams.page must be an integer greater than 0.')
-    }
-    return page
-  }
-
-  private resolveMaxResults(
-    requestedMaxResults: number | undefined,
-    pageSize: number,
-  ): number {
-    if (requestedMaxResults === undefined) return pageSize
-
-    if (!Number.isInteger(requestedMaxResults) || requestedMaxResults < 1) {
-      throw new Error(
-        'RetailerSearchParams.maxResults must be an integer greater than 0.',
-      )
-    }
-    if (requestedMaxResults > pageSize) {
-      throw new Error(
-        `RetailerSearchParams.maxResults must be <= ${pageSize}. Received: ${requestedMaxResults}.`,
-      )
-    }
-
-    return requestedMaxResults
-  }
-
-  private async bootstrapSearchContext(query: string): Promise<void> {
+  // Open the search page first so in-page API calls inherit the browser context
+  // and Cloudflare/session cookies.
+  private async openSearchPageForSession(query: string): Promise<void> {
     await this.page.goto(`${BASE_URL}/buscar/?query=${encodeURIComponent(query)}`, {
       waitUntil: 'domcontentloaded',
     })
-  }
-
-  private buildSearchApiUrl(params: SearchApiUrlParams): string {
-    const url = new URL(API_BASE)
-    url.searchParams.set('query', params.query)
-    url.searchParams.set('sort', 'relevance')
-    url.searchParams.set('sortVersion', 'default')
-    url.searchParams.set('channel', 'es')
-    url.searchParams.set('page', String(params.pageNumber))
-    url.searchParams.set('pageSize', String(params.pageSize))
-    url.searchParams.set('analytics', 'true')
-    url.searchParams.set('showOem', 'false')
-    return url.toString()
-  }
-
-  private mapArticleToProductListItem(
-    article: ApiArticle,
-    position: number,
-  ): ProductListItem {
-    const normalizedSlug = article.slug.replace(/^\/+/, '')
-
-    return {
-      id: article.id,
-      name: article.name,
-      price: this.resolveArticlePrice(article),
-      position,
-      url: `${BASE_URL}/${normalizedSlug}`,
-      imageUrl: article.images?.medium?.path ?? article.images?.small?.path,
-      category: article.mainCategory?.name,
-    }
-  }
-
-  private resolveArticlePrice(article: ApiArticle): number {
-    const candidatePrice = article.promotionalPrice ?? article.originalPrice
-    const hasValidPrice =
-      typeof candidatePrice === 'number' && Number.isFinite(candidatePrice)
-
-    if (hasValidPrice) return candidatePrice
-
-    this.logger.log('warn', 'PCC list item missing/invalid price (defaulting to 0)', {
-      id: article.id,
-      slug: article.slug,
-      promotionalPrice: article.promotionalPrice,
-      originalPrice: article.originalPrice,
-    })
-
-    return 0
   }
 
   private async fetchSearchApi(apiUrl: string): Promise<ApiResponse> {
@@ -228,15 +118,7 @@ export class ListScraper {
         )) as ApiEvaluateResult
 
         if ('__error' in apiResult) {
-          const { status, text } = apiResult.__error
-
-          if (status === 429 || (status >= 500 && status <= 599)) {
-            throw new Error(
-              `Search API retryable error ${status}: ${text.slice(0, 200)}`,
-            )
-          }
-
-          throw new Error(`Search API error ${status}: ${text.slice(0, 200)}`)
+          throw this.toSearchApiError(apiResult.__error)
         }
 
         this.logger.log('debug', 'PCC search API success', {
@@ -263,5 +145,15 @@ export class ListScraper {
         lastErr instanceof Error ? lastErr.message : String(lastErr)
       }`,
     )
+  }
+
+  private toSearchApiError(apiError: ApiErrorPayload['__error']): Error {
+    const message = apiError.text.slice(0, 200)
+
+    if (apiError.status === 429 || (apiError.status >= 500 && apiError.status <= 599)) {
+      return new Error(`Search API retryable error ${apiError.status}: ${message}`)
+    }
+
+    return new Error(`Search API error ${apiError.status}: ${message}`)
   }
 }
