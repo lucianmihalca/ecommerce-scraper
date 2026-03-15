@@ -135,8 +135,10 @@ src/
 │   └── pccomponentes/
 │       ├── index.ts                # PcComponentes — implements IRetailer
 │       ├── scrapers/
-│       │   ├── ListScraper.ts      # Extracts product cards via internal API
-│       │   └── DetailScraper.ts    # Extracts detail via JSON-LD + DOM fallbacks
+│       │   ├── ListScraper.ts           # Orchestrates search: navigate, call API, map results
+│       │   ├── ListScraper.helpers.ts   # API types, param validation, data transformation
+│       │   ├── DetailScraper.ts         # Orchestrates detail scraping: JSON-LD + DOM fallbacks
+│       │   └── DetailScraper.helpers.ts # resolveAbsoluteUrl, isLowQualityDescription
 │       ├── jsonld.ts               # Schema.org JSON-LD parsing helpers
 │       └── constants.ts            # BASE_URL, API_BASE, MAX_API_PAGE_SIZE
 ├── utils/
