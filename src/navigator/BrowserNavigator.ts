@@ -1,6 +1,6 @@
 import { chromium } from 'playwright-extra'
 import StealthPlugin from 'puppeteer-extra-plugin-stealth'
-import type { Browser, BrowserContext, Page } from 'playwright'
+import type { Browser, BrowserContext, BrowserContextOptions, Page } from 'playwright'
 
 import { resolveLogger, type Logger } from '../utils/logger'
 import type { NavigatorConfig } from './navigator.types'
@@ -9,27 +9,40 @@ import type { NavigatorConfig } from './navigator.types'
 // headless Playwright (navigator.webdriver, chrome.runtime, plugins, etc.)
 chromium.use(StealthPlugin())
 
-const DEFAULT_USER_AGENT =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-
 export class BrowserNavigator {
   private browser: Browser | null = null
   private context: BrowserContext | null = null
 
   private readonly logger: Logger
   private readonly requestDelayMs: number
+  private readonly requestDelayJitterMs: number
 
   // Serializes critical lifecycle operations (open/close/newPage).
   private lifecycleLock: Promise<void> = Promise.resolve()
 
   constructor(private readonly config: NavigatorConfig = {}) {
     this.logger = resolveLogger(config)
-    this.requestDelayMs = config.requestDelayMs ?? 0
+    this.requestDelayMs = Math.max(0, config.requestDelayMs ?? 0)
+    this.requestDelayJitterMs = Math.max(0, config.requestDelayJitterMs ?? 0)
+  }
+
+  private resolveRequestDelayMs(): number {
+    const base = this.requestDelayMs
+    const jitter = this.requestDelayJitterMs
+
+    // Allow "jitter-only" behavior when base delay is 0.
+    if (base <= 0 && jitter <= 0) return 0
+    if (jitter <= 0) return base
+
+    const minDelay = base === 0 && jitter > 0 ? 1 : Math.max(0, base - jitter)
+    const maxDelay = base + jitter
+    return minDelay + Math.floor(Math.random() * (maxDelay - minDelay + 1))
   }
 
   async waitRequestDelay(): Promise<void> {
-    if (this.requestDelayMs <= 0) return
-    await new Promise((resolve) => setTimeout(resolve, this.requestDelayMs))
+    const delayMs = this.resolveRequestDelayMs()
+    if (delayMs <= 0) return
+    await new Promise((resolve) => setTimeout(resolve, delayMs))
   }
 
   private isReady(): boolean {
@@ -106,7 +119,7 @@ export class BrowserNavigator {
         headless = true,
         timeoutMs = 30_000,
         slowMoMs = 0,
-        userAgent = DEFAULT_USER_AGENT,
+        userAgent,
         locale,
         timezoneId,
         viewport,
@@ -118,12 +131,14 @@ export class BrowserNavigator {
         // Assign immediately so we can close in the catch block if newContext() fails.
         this.browser = await chromium.launch({ headless, slowMo: slowMoMs })
 
-        const context = await this.browser.newContext({
-          userAgent,
+        const contextOptions: BrowserContextOptions = {
           locale,
           timezoneId,
           viewport,
-        })
+        }
+        if (userAgent) contextOptions.userAgent = userAgent
+
+        const context = await this.browser.newContext(contextOptions)
 
         // Configure timeouts before exposing this.context.
         context.setDefaultTimeout(timeoutMs)
@@ -136,6 +151,7 @@ export class BrowserNavigator {
           locale,
           timezoneId,
           viewport,
+          hasCustomUserAgent: Boolean(userAgent),
         })
       } catch (error: unknown) {
         try {
