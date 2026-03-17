@@ -19,88 +19,151 @@ export class BrowserNavigator {
   private readonly logger: Logger
   private readonly requestDelayMs: number
 
+  // Serializes critical lifecycle operations (open/close/newPage).
+  private lifecycleLock: Promise<void> = Promise.resolve()
+
   constructor(private readonly config: NavigatorConfig = {}) {
     this.logger = resolveLogger(config)
-
     this.requestDelayMs = config.requestDelayMs ?? 0
   }
 
   async waitRequestDelay(): Promise<void> {
     if (this.requestDelayMs <= 0) return
-
     await new Promise((resolve) => setTimeout(resolve, this.requestDelayMs))
   }
 
-  async close(): Promise<void> {
+  private isReady(): boolean {
+    return Boolean(this.browser && this.browser.isConnected() && this.context)
+  }
+
+  private async withLifecycleLock<T>(task: () => Promise<T>): Promise<T> {
+    const previousLock = this.lifecycleLock
+    let releaseLock!: () => void
+
+    this.lifecycleLock = new Promise<void>((resolve) => {
+      releaseLock = resolve
+    })
+
+    await previousLock
     try {
-      if (this.context) await this.context.close()
+      return await task()
     } finally {
-      this.context = null
+      releaseLock()
+    }
+  }
+
+  // Used within the lock to avoid deadlocks.
+  private async closeUnlocked(): Promise<void> {
+    const context = this.context
+    const browser = this.browser
+
+    this.context = null
+    this.browser = null
+
+    const errors: unknown[] = []
+
+    if (context) {
+      try {
+        await context.close()
+      } catch (error: unknown) {
+        errors.push(error)
+      }
     }
 
-    try {
-      if (this.browser) await this.browser.close()
-    } finally {
-      this.browser = null
+    if (browser) {
+      try {
+        await browser.close()
+      } catch (error: unknown) {
+        errors.push(error)
+      }
     }
+
+    if (errors.length > 0) {
+      throw errors[0] instanceof Error ? errors[0] : new Error(String(errors[0]))
+    }
+  }
+
+  async close(): Promise<void> {
+    await this.withLifecycleLock(async () => {
+      await this.closeUnlocked()
+    })
   }
 
   async open(): Promise<void> {
-    if (this.browser) return
+    await this.withLifecycleLock(async () => {
+      if (this.isReady()) return
 
-    const {
-      headless = true, // Run browser without a graphical UI.
-      // true  → browser runs in the background (scraping/servers)
-      // false → browser window is visible (debugging)
+      // Partial state detected: force a clean rebuild.
+      if (this.browser || this.context) {
+        this.logger.log(
+          'warn',
+          'Navigator in partial state. Recreating browser session.',
+        )
+        await this.closeUnlocked()
+      }
 
-      timeoutMs = 30_000, // Default timeout for navigation and element actions (ms)
-
-      slowMoMs = 0, // Artificial delay between browser actions (ms).
-      // Example with slowMoMs = 100:
-      // click → wait 100ms → navigate → wait 100ms → type
-      // Mainly useful for debugging.
-
-      userAgent = DEFAULT_USER_AGENT, // Browser identity string used in HTTP requests
-
-      locale, // Browser language (e.g. "es-ES")
-      timezoneId, // Browser timezone (e.g. "Europe/Madrid")
-      viewport, // Browser window size (e.g. { width: 1920, height: 1080 })
-    } = this.config
-
-    try {
-      this.logger.log('debug', 'Launching browser', { headless, slowMoMs })
-
-      this.browser = await chromium.launch({ headless, slowMo: slowMoMs })
-      this.context = await this.browser.newContext({
-        userAgent,
+      const {
+        headless = true,
+        timeoutMs = 30_000,
+        slowMoMs = 0,
+        userAgent = DEFAULT_USER_AGENT,
         locale,
         timezoneId,
         viewport,
-      })
+      } = this.config
 
-      this.context.setDefaultTimeout(timeoutMs)
-      this.context.setDefaultNavigationTimeout(timeoutMs)
+      try {
+        this.logger.log('debug', 'Launching browser', { headless, slowMoMs })
 
-      this.logger.log('debug', 'Browser context ready', {
-        timeoutMs,
-        locale,
-        timezoneId,
-        viewport,
-      })
-    } catch (error: unknown) {
-      await this.close()
-      const message = error instanceof Error ? error.message : String(error)
-      this.logger.log('error', 'Failed to initialize BrowserNavigator', { message })
-      throw new Error(`Failed to initialize BrowserNavigator: ${message}`)
-    }
+        // Assign immediately so we can close in the catch block if newContext() fails.
+        this.browser = await chromium.launch({ headless, slowMo: slowMoMs })
+
+        const context = await this.browser.newContext({
+          userAgent,
+          locale,
+          timezoneId,
+          viewport,
+        })
+
+        // Configure timeouts before exposing this.context.
+        context.setDefaultTimeout(timeoutMs)
+        context.setDefaultNavigationTimeout(timeoutMs)
+
+        this.context = context
+
+        this.logger.log('debug', 'Browser context ready', {
+          timeoutMs,
+          locale,
+          timezoneId,
+          viewport,
+        })
+      } catch (error: unknown) {
+        try {
+          await this.closeUnlocked()
+        } catch (closeError: unknown) {
+          const closeMessage =
+            closeError instanceof Error ? closeError.message : String(closeError)
+          this.logger.log('warn', 'Cleanup after open failure also failed', {
+            closeMessage,
+          })
+        }
+
+        const message = error instanceof Error ? error.message : String(error)
+        this.logger.log('error', 'Failed to initialize BrowserNavigator', { message })
+        throw new Error(`Failed to initialize BrowserNavigator: ${message}`)
+      }
+    })
   }
 
   async newPage(): Promise<Page> {
-    if (!this.context) {
-      throw new Error('BrowserNavigator is not opened. Call open() first.')
-    }
-    const page = await this.context.newPage()
-    this.logger.log('debug', 'New page created')
-    return page
+    return this.withLifecycleLock(async () => {
+      if (!this.isReady() || !this.context) {
+        throw new Error('BrowserNavigator is not opened. Call open() first.')
+      }
+
+      const page = await this.context.newPage()
+      this.logger.log('debug', 'New page created')
+      return page
+    })
   }
 }
