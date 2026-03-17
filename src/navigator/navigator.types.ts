@@ -14,4 +14,10 @@ export type NavigatorConfig = {
   logLevel?: LogLevel
 
   requestDelayMs?: number
+  requestDelayJitterMs?: number
+
+  navigationRetryMaxAttempts?: number
+  navigationRetryBaseDelayMs?: number
+  navigationRetryTimeoutMs?: number
+  navigationRetryJitterMs?: number
 }

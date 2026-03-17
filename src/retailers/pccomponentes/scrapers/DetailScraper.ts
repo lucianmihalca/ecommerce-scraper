@@ -25,7 +25,9 @@ export class DetailScraper {
     const absoluteUrl = resolveAbsoluteUrl(url)
 
     await this.navigator.waitRequestDelay()
-    await this.page.goto(absoluteUrl, { waitUntil: 'domcontentloaded' })
+    await this.navigator.gotoWithRetry(this.page, absoluteUrl, {
+      waitUntil: 'domcontentloaded',
+    })
 
     await this.page.waitForSelector('table.smart-product-table, #description', {
       timeout: 10000,

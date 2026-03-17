@@ -72,9 +72,11 @@ export class ListScraper {
   // Open the search page first so in-page API calls inherit the browser context
   // and Cloudflare/session cookies.
   private async openSearchPageForSession(query: string): Promise<void> {
-    await this.page.goto(`${BASE_URL}/buscar/?query=${encodeURIComponent(query)}`, {
-      waitUntil: 'domcontentloaded',
-    })
+    await this.navigator.gotoWithRetry(
+      this.page,
+      `${BASE_URL}/buscar/?query=${encodeURIComponent(query)}`,
+      { waitUntil: 'domcontentloaded' },
+    )
   }
 
   private async fetchSearchApi(apiUrl: string): Promise<ApiResponse> {
