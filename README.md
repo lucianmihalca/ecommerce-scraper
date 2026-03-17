@@ -10,14 +10,16 @@ Built around a clean `IRetailer` interface, it separates browser navigation, pag
 - Extract full product detail (specs, images, description, brand, SKU)
 - Clean public API — consumers only interact with `PcComponentes`
 - Headless or headed browser mode via Playwright
-- Configurable request delay and log level
+- Configurable request delay with optional random jitter
+- Automatic navigation retries with linear backoff and configurable jitter
+- Configurable log level and custom logger support
 - Easily extensible to other retailers via the `IRetailer` interface
 
 ## Why PcComponentes
 
 PcComponentes is a Spanish e-commerce with real-world anti-bot protection (Cloudflare).
-Navigating it successfully required proper browser fingerprinting via Playwright and a
-custom user agent — a non-trivial challenge compared to scraping unprotected sites.
+Navigating it successfully required proper browser fingerprinting via Playwright — a
+non-trivial challenge compared to scraping unprotected sites.
 
 Product data is extracted using two complementary strategies:
 
@@ -35,6 +37,7 @@ Product data is extracted using two complementary strategies:
 | TypeScript | Type safety |
 | Playwright + playwright-extra | Browser automation |
 | puppeteer-extra-plugin-stealth | Cloudflare fingerprint evasion |
+| Vitest | Unit testing |
 | pnpm | Package manager |
 
 ## Installation
@@ -56,6 +59,9 @@ const retailer = new PcComponentes({
   headless: true,
   logLevel: 'info',
   requestDelayMs: 1500,
+  requestDelayJitterMs: 300,      // actual delay is 1500 ± 300 ms
+  navigationRetryMaxAttempts: 3,  // retry up to 3 times on network errors
+  navigationRetryBaseDelayMs: 500, // wait 500 ms × attempt before each retry
 })
 
 // Search products
@@ -84,13 +90,18 @@ pnpm demo
 | `headless` | `boolean` | `true` | Run browser in headless mode |
 | `logLevel` | `'debug' \| 'info' \| 'warn' \| 'error'` | silent | Minimum log level |
 | `logger` | `Logger` | — | Custom logger instance (overrides `logLevel`) |
-| `requestDelayMs` | `number` | `0` | Delay between requests in ms |
+| `requestDelayMs` | `number` | `0` | Base delay between requests in ms |
+| `requestDelayJitterMs` | `number` | `0` | Random jitter added to each request delay (actual delay is within `requestDelayMs ± jitter`) |
 | `timeoutMs` | `number` | `30000` | Navigation and action timeout |
 | `slowMoMs` | `number` | `0` | Artificial delay between browser actions (useful for debugging) |
-| `userAgent` | `string` | Chrome 120 | Browser user agent string |
+| `userAgent` | `string` | — | Optional custom user agent string (uses Playwright's default if omitted) |
 | `locale` | `string` | — | Browser language (e.g. `'es-ES'`) |
 | `timezoneId` | `string` | — | Browser timezone (e.g. `'Europe/Madrid'`) |
 | `viewport` | `{ width, height }` | — | Browser window size |
+| `navigationRetryMaxAttempts` | `number` | `3` | Max navigation attempts before throwing |
+| `navigationRetryBaseDelayMs` | `number` | `500` | Base delay before each retry (multiplied by attempt number) |
+| `navigationRetryTimeoutMs` | `number` | inherits `timeoutMs` | Per-attempt navigation timeout |
+| `navigationRetryJitterMs` | `number` | `0` | Random jitter added to each retry delay |
 
 ### `getProductList(params): Promise<ProductListResult>`
 
@@ -129,8 +140,12 @@ src/
 │   ├── ProductListResult.ts        # Search result wrapper
 │   └── RetailerSearchParams.ts
 ├── navigator/
-│   ├── BrowserNavigator.ts         # Playwright browser/page lifecycle
-│   └── navigator.types.ts
+│   ├── BrowserNavigator.ts         # Playwright browser/page lifecycle, retry logic, lifecycle lock
+│   ├── navigator.types.ts
+│   └── helpers/
+│       ├── delay.ts                # Request delay and retry delay with jitter
+│       ├── navigationRetry.ts      # Retryable error detection and HTTP status error factory
+│       └── number.ts               # Safe numeric coercion helpers
 ├── retailers/
 │   └── pccomponentes/
 │       ├── index.ts                # PcComponentes — implements IRetailer
@@ -175,6 +190,7 @@ export { MyRetailer } from './retailers/myretailer'
 | `pnpm build` | Compile TypeScript to `dist/` |
 | `pnpm build:watch` | Watch mode |
 | `pnpm demo` | Run the end-to-end demo |
+| `pnpm test` | Run unit tests with Vitest |
 | `pnpm lint` | Run ESLint |
 
 ## Author
