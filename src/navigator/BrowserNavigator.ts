@@ -4,21 +4,16 @@ import type { Browser, BrowserContext, BrowserContextOptions, Page } from 'playw
 
 import { resolveLogger, type Logger } from '../utils/logger'
 import type { NavigatorConfig } from './navigator.types'
+import { toNonNegativeInt, toPositiveInt } from './helpers/number'
+import { resolveNavigationRetryDelayMs, resolveRequestDelayMs } from './helpers/delay'
+import {
+  createNavigationStatusError,
+  isRetryableNavigationError,
+  type GotoOptions,
+  type GotoResult,
+} from './helpers/navigationRetry'
 
 chromium.use(StealthPlugin())
-
-type GotoOptions = NonNullable<Parameters<Page['goto']>[1]>
-type GotoResult = Awaited<ReturnType<Page['goto']>>
-type RetryableError = Error & { retryable?: boolean }
-
-const toFiniteNumber = (value: unknown, fallback: number): number =>
-  typeof value === 'number' && Number.isFinite(value) ? value : fallback
-
-const toNonNegativeInt = (value: unknown, fallback: number): number =>
-  Math.max(0, Math.floor(toFiniteNumber(value, fallback)))
-
-const toPositiveInt = (value: unknown, fallback: number): number =>
-  Math.max(1, Math.floor(toFiniteNumber(value, fallback)))
 
 export class BrowserNavigator {
   private browser: Browser | null = null
@@ -58,34 +53,13 @@ export class BrowserNavigator {
     this.navigationRetryJitterMs = toNonNegativeInt(config.navigationRetryJitterMs, 0)
   }
 
-  private resolveRequestDelayMs(): number {
-    const base = this.requestDelayMs
-    const jitter = this.requestDelayJitterMs
-
-    if (base <= 0 && jitter <= 0) return 0
-    if (jitter <= 0) return base
-
-    const minDelay = base === 0 ? 1 : Math.max(0, base - jitter)
-    const maxDelay = base + jitter
-    return minDelay + Math.floor(Math.random() * (maxDelay - minDelay + 1))
-  }
-
   async waitRequestDelay(): Promise<void> {
-    const delayMs = this.resolveRequestDelayMs()
+    const delayMs = resolveRequestDelayMs(
+      this.requestDelayMs,
+      this.requestDelayJitterMs,
+    )
     if (delayMs <= 0) return
     await new Promise((resolve) => setTimeout(resolve, delayMs))
-  }
-
-  private resolveNavigationRetryDelayMs(attempt: number): number {
-    const base = this.navigationRetryBaseDelayMs * attempt
-    const jitter = this.navigationRetryJitterMs
-
-    if (base <= 0 && jitter <= 0) return 0
-    if (jitter <= 0) return base
-
-    const minDelay = base === 0 ? 1 : Math.max(0, base - jitter)
-    const maxDelay = base + jitter
-    return minDelay + Math.floor(Math.random() * (maxDelay - minDelay + 1))
   }
 
   async gotoWithRetry(
@@ -106,14 +80,14 @@ export class BrowserNavigator {
         const status = response?.status()
 
         if (typeof status === 'number' && status >= 400) {
-          throw this.createNavigationStatusError(url, status)
+          throw createNavigationStatusError(url, status)
         }
 
         this.logger.log('debug', 'Navigation success', { url, attempt, status })
         return response
       } catch (error: unknown) {
         lastError = error
-        const retryable = this.isRetryableNavigationError(error)
+        const retryable = isRetryableNavigationError(error)
 
         this.logger.log('warn', 'Navigation attempt failed', {
           url,
@@ -125,7 +99,11 @@ export class BrowserNavigator {
 
         if (!retryable || attempt === this.navigationRetryMaxAttempts) break
 
-        const retryDelayMs = this.resolveNavigationRetryDelayMs(attempt)
+        const retryDelayMs = resolveNavigationRetryDelayMs(
+          this.navigationRetryBaseDelayMs,
+          this.navigationRetryJitterMs,
+          attempt,
+        )
         if (retryDelayMs > 0) await page.waitForTimeout(retryDelayMs)
       }
     }
@@ -134,34 +112,6 @@ export class BrowserNavigator {
       `Navigation failed after ${this.navigationRetryMaxAttempts} attempts for ${url}. Last error: ${
         lastError instanceof Error ? lastError.message : String(lastError)
       }`,
-    )
-  }
-
-  private createNavigationStatusError(url: string, status: number): RetryableError {
-    const error = new Error(
-      `Navigation failed with status ${status} at: ${url}`,
-    ) as RetryableError
-    error.retryable = status === 408 || status === 429 || status >= 500
-    return error
-  }
-
-  private isRetryableNavigationError(error: unknown): boolean {
-    const maybeRetryable = error as RetryableError
-    if (typeof maybeRetryable?.retryable === 'boolean') {
-      return maybeRetryable.retryable
-    }
-
-    if (!(error instanceof Error)) return true
-    if (error.name === 'TimeoutError') return true
-
-    const message = error.message.toLowerCase()
-    return (
-      message.includes('timeout') ||
-      message.includes('net::err') ||
-      message.includes('econnreset') ||
-      message.includes('enotfound') ||
-      message.includes('eai_again') ||
-      message.includes('socket hang up')
     )
   }
 
